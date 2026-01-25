@@ -31,7 +31,9 @@
 - Fork或创建此仓库
 - 在仓库设置 > Secrets and variables > Actions中添加以下Secrets：
   - `LLMGH_TOKEN`：机器人账号的PAT
-  - `ANTHROPIC_API_KEY`：用于Claude API的Anthropic API密钥
+  - `ANTHROPIC_API_KEY`：用于Claude API的Anthropic API密钥（或使用MIMO_API_KEY）
+  - `MIMO_API_KEY`：用于代理调用大模型的token（如果使用自定义Claude API端点）
+  - `WEINAR_API_KEY`：@WhiteElephantIsNotARobot的GitHub token
 
 ### 3. 自定义配置
 - 编辑`.claude/config.json`调整Claude Code设置

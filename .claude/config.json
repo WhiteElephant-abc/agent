@@ -4,5 +4,12 @@
   "temperature": 0.2,
   "system": "",
   "tools": [],
-  "mcp_servers": {}
+  "mcp_servers": {},
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.xiaomimimo.com/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "$MIMO_API_KEY",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "mimo-v2-flash",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "mimo-v2-flash",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "mimo-v2-flash"
+  }
 }

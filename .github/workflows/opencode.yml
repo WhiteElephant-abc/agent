@@ -29,6 +29,8 @@ jobs:
         uses: anomalyco/opencode/github@latest
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          WEINAR_API_KEY: ${{ secrets.WEINAR_API_KEY }}
+          MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
         with:
           model: deepseek/deepseek-reasoner
           prompt: |
