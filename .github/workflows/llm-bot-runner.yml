@@ -18,8 +18,8 @@ jobs:
     env:
       LLM_TASK: ${{ inputs.task }}
       LLM_CONTEXT: ${{ inputs.context }}
-      GITHUBTOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GHTOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUBTOKEN: ${{ secrets.WEINAR_API_KEY }}
+      GHTOKEN: ${{ secrets.WEINAR_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     permissions:
       contents: write
@@ -85,26 +85,26 @@ jobs:
       - name: 以GitHub机器人身份运行Claude Code
         run: |
           if [ -f ~/.claude/system_prompt.txt ]; then
-            claude \
-              -p "$LLM_TASK" \
-              --append-user-prompt "$LLM_CONTEXT" \
-              --system-prompt-file ~/.claude/system_prompt.txt \
-              --allowedTools "Read,Edit,Bash"
+             claude \
+               -p "$LLM_TASK" \
+               --append-user-prompt "$LLM_CONTEXT" \
+               --system-prompt-file ~/.claude/system_prompt.txt \
+               --allowedTools "Bash, TaskOutput, Edit, ExitPlanMode, Glob, Grep, KillShell, MCPSearch, NotebookEdit, Read, Skill, Task, TaskCreate, TaskGet, TaskList, TaskUpdate, WebFetch, WebSearch, Write"
           elif [ -n "$SYSTEM_PROMPT" ]; then
-            claude \
-              -p "$LLM_TASK" \
-              --append-user-prompt "$LLM_CONTEXT" \
-              --system-prompt "$SYSTEM_PROMPT" \
-              --allowedTools "Read,Edit,Bash"
+             claude \
+               -p "$LLM_TASK" \
+               --append-user-prompt "$LLM_CONTEXT" \
+               --system-prompt "$SYSTEM_PROMPT" \
+               --allowedTools "Bash, TaskOutput, Edit, ExitPlanMode, Glob, Grep, KillShell, MCPSearch, NotebookEdit, Read, Skill, Task, TaskCreate, TaskGet, TaskList, TaskUpdate, WebFetch, WebSearch, Write"
           else
-            claude \
-              -p "$LLM_TASK" \
-              --append-user-prompt "$LLM_CONTEXT" \
-              --allowedTools "Read,Edit,Bash"
+             claude \
+               -p "$LLM_TASK" \
+               --append-user-prompt "$LLM_CONTEXT" \
+               --allowedTools "Bash, TaskOutput, Edit, ExitPlanMode, Glob, Grep, KillShell, MCPSearch, NotebookEdit, Read, Skill, Task, TaskCreate, TaskGet, TaskList, TaskUpdate, WebFetch, WebSearch, Write"
           fi
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.WEINAR_API_KEY }}
+          GH_TOKEN: ${{ secrets.WEINAR_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
           WEINAR_API_KEY: ${{ secrets.WEINAR_API_KEY }}
