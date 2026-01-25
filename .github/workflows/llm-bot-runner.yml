@@ -80,7 +80,8 @@ jobs:
 
       - name: 安装Claude CLI
         run: |
-          curl -sSL https://install.anthropic.com | sh
+          curl -fsSL https://claude.ai/install.sh | bash
+          claude --version
 
       - name: 以GitHub机器人身份运行Claude Code
         run: |
@@ -102,14 +103,8 @@ jobs:
                --append-user-prompt "$LLM_CONTEXT" \
                --allowedTools "Bash, TaskOutput, Edit, ExitPlanMode, Glob, Grep, KillShell, MCPSearch, NotebookEdit, Read, Skill, Task, TaskCreate, TaskGet, TaskList, TaskUpdate, WebFetch, WebSearch, Write"
           fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.WEINAR_API_KEY }}
-          GH_TOKEN: ${{ secrets.WEINAR_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
-          WEINAR_API_KEY: ${{ secrets.WEINAR_API_KEY }}
-          ANTHROPIC_BASE_URL: "https://api.xiaomimimo.com/anthropic"
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MIMO_API_KEY }}
-          ANTHROPIC_DEFAULT_OPUS_MODEL: "mimo-v2-flash"
-          ANTHROPIC_DEFAULT_SONNET_MODEL: "mimo-v2-flash"
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: "mimo-v2-flash"
+          env:
+            GITHUB_TOKEN: ${{ secrets.WEINAR_API_KEY }}
+            GH_TOKEN: ${{ secrets.WEINAR_API_KEY }}
+            ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+            WEINAR_API_KEY: ${{ secrets.WEINAR_API_KEY }}
