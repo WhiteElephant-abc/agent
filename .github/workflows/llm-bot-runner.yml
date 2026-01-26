@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: 'LLM task description'
+        description: 'LLM的任务描述'
         required: true
         type: string
       context:
-        description: 'Task JSON context'
+        description: '任务的JSON上下文'
         required: true
         type: string
 
@@ -18,23 +18,23 @@ jobs:
     env:
       LLM_TASK: ${{ inputs.task }}
       LLM_CONTEXT: ${{ inputs.context }}
-      # GitHub identity tokens (4 names set)
+      # GitHub身份令牌（4个名称都设置）
       GITHUB_TOKEN: ${{ secrets.WEINAR_API_KEY }}
       GH_TOKEN: ${{ secrets.WEINAR_API_KEY }}
       GITHUBTOKEN: ${{ secrets.WEINAR_API_KEY }}
       GHTOKEN: ${{ secrets.WEINAR_API_KEY }}
-      # Claude Code environment variable configuration
+      # Claude Code环境变量配置
       ANTHROPIC_API_KEY: ${{ secrets.MIMO_API_KEY }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.MIMO_API_KEY }}
       ANTHROPIC_BASE_URL: "https://api.xiaomimimo.com/anthropic"
       ANTHROPIC_DEFAULT_OPUS_MODEL: "mimo-v2-flash"
       ANTHROPIC_DEFAULT_SONNET_MODEL: "mimo-v2-flash"
       ANTHROPIC_DEFAULT_HAIKU_MODEL: "mimo-v2-flash"
-      # MCP server environment variables
+      # MCP服务器环境变量
       CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
-      # System prompt
+      # 系统提示词
       SYSTEM_PROMPT: ${{ vars.SYSTEM_PROMPT }}
-      # Other tokens
+      # 其他令牌
       MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
       WEINAR_API_KEY: ${{ secrets.WEINAR_API_KEY }}
     permissions:
@@ -56,117 +56,117 @@ jobs:
 
       - name: Validate tokens and environment variables
         run: |
-          echo "Validating environment variables..."
-          # Validate GitHub token
+          echo "验证环境变量..."
+          # 验证GitHub令牌
           if [ -z "$GITHUB_TOKEN" ]; then
-            echo "Error: GITHUB_TOKEN not set"
+            echo "错误: GITHUB_TOKEN未设置"
             exit 1
           else
-            echo "GitHub token is set"
+            echo "GitHub令牌已设置"
           fi
-          # Validate Anthropic auth token
+          # 验证Anthropic认证令牌
           if [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
-            echo "Error: ANTHROPIC_AUTH_TOKEN not set"
+            echo "错误: ANTHROPIC_AUTH_TOKEN未设置"
             exit 1
           else
-            echo "Anthropic auth token is set"
+            echo "Anthropic认证令牌已设置"
           fi
-          # Validate system prompt
+          # 验证系统提示词
           if [ -z "$SYSTEM_PROMPT" ]; then
-            echo "Error: SYSTEM_PROMPT not set"
+            echo "错误: SYSTEM_PROMPT未设置"
             exit 1
           else
-            echo "System prompt is set"
+            echo "系统提示词已设置"
           fi
 
       - name: Add MCP servers
         run: |
-          # Add DuckDuckGo search server
-          echo "Adding DuckDuckGo search server..."
+          # 添加DuckDuckGo搜索服务器
+          echo "添加DuckDuckGo搜索服务器..."
           claude mcp add ddg-search -- uvx duckduckgo-mcp-server
 
-          # Add Context7 HTTP server (if CONTEXT7_API_KEY is set)
+          # 添加Context7 HTTP服务器（如果CONTEXT7_API_KEY已设置）
           if [ -n "$CONTEXT7_API_KEY" ]; then
-            echo "Adding Context7 HTTP server..."
+            echo "添加Context7 HTTP服务器..."
             claude mcp add --transport http context7 https://mcp.context7.com/mcp \
               --header "CONTEXT7_API_KEY: $CONTEXT7_API_KEY"
           else
-            echo "Warning: CONTEXT7_API_KEY not set, skipping Context7 server addition"
+            echo "警告: CONTEXT7_API_KEY未设置，跳过Context7服务器添加"
           fi
         env:
           CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
 
       - name: Pre-configure Git (user, SSH, GPG signing)
         run: |
-          echo "Configuring Git user information..."
+          echo "配置Git用户信息..."
           git config --global user.name "WhiteElephantIsNotARobot"
           git config --global user.email "257136373+WhiteElephantIsNotARobot@users.noreply.github.com"
 
-          echo "Configuring SSH authentication..."
-          # Create SSH directory
+          echo "配置SSH认证..."
+          # 创建SSH目录
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
 
-          # Write SSH private key from environment variable (if SSH_PRIVATE_KEY is provided)
+          # 从环境变量写入SSH私钥（如果提供了SSH_PRIVATE_KEY）
           if [ -n "$SSH_PRIVATE_KEY" ]; then
             echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
             chmod 600 ~/.ssh/id_rsa
-            echo "SSH private key written to ~/.ssh/id_rsa"
+            echo "SSH私钥已写入 ~/.ssh/id_rsa"
 
-            # Start ssh-agent and add key
+            # 启动ssh-agent并添加密钥
             eval "$(ssh-agent -s)"
             ssh-add ~/.ssh/id_rsa
-            echo "SSH key added to ssh-agent"
+            echo "SSH密钥已添加到ssh-agent"
           else
-            echo "Warning: SSH_PRIVATE_KEY environment variable not set, skipping SSH configuration"
+            echo "警告: SSH_PRIVATE_KEY环境变量未设置，跳过SSH配置"
           fi
 
-          # Add GitHub to known_hosts
+          # 添加GitHub到known_hosts
           ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
           chmod 644 ~/.ssh/known_hosts
 
-          echo "Configuring GPG signing..."
-          # Write GPG private key from environment variable (if GPG_PRIVATE_KEY is provided)
+          echo "配置GPG签名..."
+          # 从环境变量写入GPG私钥（如果提供了GPG_PRIVATE_KEY）
           if [ -n "$GPG_PRIVATE_KEY" ]; then
             echo "$GPG_PRIVATE_KEY" | gpg --import --batch
-            echo "GPG private key imported"
+            echo "GPG私钥已导入"
 
-            # Get GPG key ID
+            # 获取GPG密钥ID
             GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG "257136373+WhiteElephantIsNotARobot@users.noreply.github.com" 2>/dev/null | grep sec | awk '{print $2}' | cut -d'/' -f2)
             if [ -n "$GPG_KEY_ID" ]; then
-              # Configure git to use GPG signing
+              # 配置git使用GPG签名
               git config --global user.signingkey "$GPG_KEY_ID"
               git config --global commit.gpgsign true
               git config --global gpg.program gpg
-              echo "GPG signing configured, key ID: $GPG_KEY_ID"
+              echo "GPG签名已配置，密钥ID: $GPG_KEY_ID"
             else
-              echo "Warning: Could not find GPG key ID"
+              echo "警告: 无法找到GPG密钥ID"
             fi
           else
-            echo "Warning: GPG_PRIVATE_KEY environment variable not set, skipping GPG configuration"
+            echo "警告: GPG_PRIVATE_KEY环境变量未设置，跳过GPG配置"
           fi
 
-          echo "Git pre-configuration complete"
+          echo "Git预配置完成"
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
 
       - name: Run Claude Code as GitHub bot
         run: |
-          echo "Running Claude Code..."
-          echo "Original task: $LLM_TASK"
-          echo "System prompt length: ${#SYSTEM_PROMPT} characters"
+          echo "运行Claude Code..."
+          echo "原始任务: $LLM_TASK"
+          echo "系统提示词长度: ${#SYSTEM_PROMPT} 字符"
 
-          # Write JSON context to file (save to /home/runner/ directory)
+          # 将JSON上下文写入文件（保存到/home/runner/目录）
           echo "$LLM_CONTEXT" > /home/runner/context.json
           CONTEXT_CHARS=$(wc -m < /home/runner/context.json)
-          echo "Context file size: $CONTEXT_CHARS characters"
-          # Don't directly cat content to avoid log pollution
+          echo "上下文文件大小: $CONTEXT_CHARS 字符"
+          # 不直接cat内容，避免日志污染
           echo ""
 
-          # Build enhanced task string with instruction to read context.json
-          ENHANCED_TASK=$(printf "%s\n\n> Task context saved to /home/runner/context.json, %s characters. Read this file to understand context!" "$LLM_TASK" "$CONTEXT_CHARS")
-          echo "Enhanced task: $ENHANCED_TASK"
+          # 构建新任务字符串，包含读取context.json的指示
+          ENHANCED_TASK=$(printf "%s\n\n> 任务上下文已保存到/home/runner/context.json，共%s字符。阅读该文件以了解上下文！" "$LLM_TASK" "$CONTEXT_CHARS")
+          echo "增强任务: $ENHANCED_TASK"
 
           claude \
             -p "$ENHANCED_TASK" \
@@ -175,24 +175,24 @@ jobs:
             --output-format=stream-json \
             --verbose
 
-          # Ensure working directory exists (inserted between three Claude calls)
+          # 确保工作目录存在（在三次Claude调用中间插入）
           mkdir -p /home/runner/work
 
-          # Self-check
+          # 自查
           claude \
-            -p "Please quickly self-check if you have left a reply on GitHub. If not, please leave a reply as required. Also quickly check the workspace to ensure all changes have been committed and pushed, and that a PR exists. Any unpushed changes will be permanently destroyed after this session ends!" \
+            -p "请快速自查是否在 GitHub 留下回复，如果否，请根据要求在 GitHub 中留下回复。另请快速检查工作区，确保所有更改都已经提交并推送，确保 PR 已存在，任何未推送的更改都将在此会话结束后被永久销毁！" \
             --system-prompt "$SYSTEM_PROMPT" \
             --allowedTools "Bash,TaskOutput,Edit,ExitPlanMode,Glob,Grep,KillShell,MCPSearch,NotebookEdit,Read,Skill,Task,TaskCreate,TaskGet,TaskList,TaskUpdate,WebFetch,WebSearch,Write,mcp__ddg-search__*,mcp__context7__*" \
             --output-format=stream-json \
             --verbose \
             --continue
 
-          # Ensure working directory exists again
+          # 再次确保工作目录存在
           mkdir -p /home/runner/work
 
-          # Self-check again
+          # 再次自查
           claude \
-            -p "Please confirm again: all changes have been committed and pushed, and a PR exists. Any unpushed changes will be permanently destroyed after this session ends!" \
+            -p "请再次确认：所有更改都已经提交并推送，并且 PR 已存在，任何未推送的更改都将在此会话结束后被永久销毁！" \
             --system-prompt "$SYSTEM_PROMPT" \
             --allowedTools "Bash,TaskOutput,Edit,ExitPlanMode,Glob,Grep,KillShell,MCPSearch,NotebookEdit,Read,Skill,Task,TaskCreate,TaskGet,TaskList,TaskUpdate,WebFetch,WebSearch,Write,mcp__ddg-search__*,mcp__context7__*" \
             --output-format=stream-json \
