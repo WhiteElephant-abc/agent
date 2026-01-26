@@ -96,6 +96,61 @@ jobs:
         env:
           CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
 
+      - name: 预配置Git（用户、SSH、GPG签名）
+        run: |
+          echo "配置Git用户信息..."
+          git config --global user.name "WhiteElephantIsNotARobot"
+          git config --global user.email "257136373+WhiteElephantIsNotARobot@users.noreply.github.com"
+
+          echo "配置SSH认证..."
+          # 创建SSH目录
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          # 从环境变量写入SSH私钥（如果提供了SSH_PRIVATE_KEY）
+          if [ -n "$SSH_PRIVATE_KEY" ]; then
+            echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+            echo "SSH私钥已写入 ~/.ssh/id_rsa"
+
+            # 启动ssh-agent并添加密钥
+            eval "$(ssh-agent -s)"
+            ssh-add ~/.ssh/id_rsa
+            echo "SSH密钥已添加到ssh-agent"
+          else
+            echo "警告: SSH_PRIVATE_KEY环境变量未设置，跳过SSH配置"
+          fi
+
+          # 添加GitHub到known_hosts
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 644 ~/.ssh/known_hosts
+
+          echo "配置GPG签名..."
+          # 从环境变量写入GPG私钥（如果提供了GPG_PRIVATE_KEY）
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
+            echo "$GPG_PRIVATE_KEY" | gpg --import --batch
+            echo "GPG私钥已导入"
+
+            # 获取GPG密钥ID
+            GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG "257136373+WhiteElephantIsNotARobot@users.noreply.github.com" 2>/dev/null | grep sec | awk '{print $2}' | cut -d'/' -f2)
+            if [ -n "$GPG_KEY_ID" ]; then
+              # 配置git使用GPG签名
+              git config --global user.signingkey "$GPG_KEY_ID"
+              git config --global commit.gpgsign true
+              git config --global gpg.program gpg
+              echo "GPG签名已配置，密钥ID: $GPG_KEY_ID"
+            else
+              echo "警告: 无法找到GPG密钥ID"
+            fi
+          else
+            echo "警告: GPG_PRIVATE_KEY环境变量未设置，跳过GPG配置"
+          fi
+
+          echo "Git预配置完成"
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+
       - name: 以GitHub机器人身份运行Claude Code
         run: |
           echo "运行Claude Code..."
