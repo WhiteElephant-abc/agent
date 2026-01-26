@@ -229,6 +229,71 @@ def truncate_context_by_chars(items: list, max_chars: int) -> tuple[list, bool]:
     is_truncated = len(selected_indices) < len(items)
     return result, is_truncated
 
+
+async def fetch_and_truncate_context(repo: str, issue_number: int, context: TaskContext) -> None:
+    """
+    获取评论和review历史，合并为统一时间线后截断，并更新到context中。
+
+    Args:
+        repo: 仓库名称 (owner/repo)
+        issue_number: PR/Issue编号
+        context: TaskContext对象，用于更新comments_history和reviews_history
+    """
+    # 获取issue/PR评论
+    all_comments = await fetch_issue_comments(repo, issue_number)
+    # 获取review历史
+    all_reviews = await fetch_pr_reviews(repo, issue_number)
+
+    if not all_comments and not all_reviews:
+        return
+
+    # 准备统一格式的数据
+    comment_items = []
+    for c in all_comments:
+        comment_items.append({
+            "id": c.get("id"),
+            "user": c.get("user", {}).get("login"),
+            "body": c.get("body"),
+            "created_at": c.get("created_at")
+        })
+
+    review_items = []
+    for r in all_reviews:
+        review_items.append({
+            "id": r.get("id"),
+            "user": r.get("user", {}).get("login"),
+            "body": r.get("body"),
+            "state": r.get("state"),
+            "submitted_at": r.get("submitted_at")
+        })
+
+    # 合并为统一时间线并排序
+    merged_timeline = merge_and_sort_timeline(comment_items, review_items)
+
+    # 统一截断
+    truncated, is_truncated_flag = truncate_context_by_chars(merged_timeline, CONTEXT_MAX_CHARS)
+
+    # 解析回结构化数据，按类型分开存储
+    context.comments_history = []
+    context.reviews_history = []
+    for item in truncated:
+        # Skip system_notice items
+        if isinstance(item, str) and "system_notice" in item:
+            parsed = json.loads(item)
+            if parsed.get("type") == "system_notice":
+                continue
+        parsed = item if isinstance(item, dict) else json.loads(item)
+        if parsed.get("type") == "comment":
+            # 移除type字段后存储
+            parsed.pop("type", None)
+            context.comments_history.append(parsed)
+        elif parsed.get("type") == "review":
+            parsed.pop("type", None)
+            context.reviews_history.append(parsed)
+
+    # 更新截断标志
+    context.is_truncated = context.is_truncated or is_truncated_flag
+
 async def extract_context_from_event(event_type: str, payload: Dict[str, Any], event_id: str = "") -> TaskContext:
     """从GitHub webhook负载中提取相关上下文，包括历史数据。"""
     repo = payload.get("repository", {}).get("full_name", "")
@@ -347,27 +412,9 @@ async def extract_context_from_event(event_type: str, payload: Dict[str, Any], e
                             }
                             context.review_comments_batch.append(comment_data)
 
-            # 获取review历史（无论是否提及都获取）
+            # 获取所有相关数据（issue评论、review历史、review评论）并合并为统一时间线
             if context.issue_number:
-                all_reviews = await fetch_pr_reviews(repo, context.issue_number)
-                if all_reviews:
-                    # 提取review文本用于截断
-                    review_texts = []
-                    for r in all_reviews:
-                        review_data = {
-                            "id": r.get("id"),
-                            "user": r.get("user", {}).get("login"),
-                            "body": r.get("body"),
-                            "state": r.get("state"),
-                            "submitted_at": r.get("submitted_at")
-                        }
-                        review_texts.append(json.dumps(review_data))
-
-                    truncated, is_truncated_flag = truncate_context_by_chars(review_texts, CONTEXT_MAX_CHARS)
-                    # 解析回结构化数据
-                    context.reviews_history = [json.loads(item) for item in truncated]
-                    # 更新截断标志
-                    context.is_truncated = context.is_truncated or is_truncated_flag
+                await fetch_and_truncate_context(repo, context.issue_number, context)
 
         elif event_type == "pull_request_review_comment":
             pr = payload.get("pull_request", {})
@@ -389,44 +436,9 @@ async def extract_context_from_event(event_type: str, payload: Dict[str, Any], e
             comment_text = comment.get("body", "")
             is_mention_in_comment = any(mention in comment_text for mention in BOT_MENTIONS) if comment_text else False
 
-            # 获取评论历史和review历史（无论是否提及都获取，但只有提及时才触发工作流）
+            # 获取评论历史和review历史，合并为统一时间线后截断
             if context.issue_number and is_mention_in_comment:
-                # 获取PR评论
-                all_comments = await fetch_issue_comments(repo, context.issue_number)
-                if all_comments:
-                    comment_texts = []
-                    for c in all_comments:
-                        comment_data = {
-                            "id": c.get("id"),
-                            "user": c.get("user", {}).get("login"),
-                            "body": c.get("body"),
-                            "created_at": c.get("created_at")
-                        }
-                        comment_texts.append(json.dumps(comment_data))
-
-                    truncated, is_truncated_flag = truncate_context_by_chars(comment_texts, CONTEXT_MAX_CHARS)
-                    context.comments_history = [json.loads(item) for item in truncated]
-                    # 更新截断标志
-                    context.is_truncated = context.is_truncated or is_truncated_flag
-
-                # 获取review历史
-                all_reviews = await fetch_pr_reviews(repo, context.issue_number)
-                if all_reviews:
-                    review_texts = []
-                    for r in all_reviews:
-                        review_data = {
-                            "id": r.get("id"),
-                            "user": r.get("user", {}).get("login"),
-                            "body": r.get("body"),
-                            "state": r.get("state"),
-                            "submitted_at": r.get("submitted_at")
-                        }
-                        review_texts.append(json.dumps(review_data))
-
-                    truncated, is_truncated_flag = truncate_context_by_chars(review_texts, CONTEXT_MAX_CHARS)
-                    context.reviews_history = [json.loads(item) for item in truncated]
-                    # 更新截断标志
-                    context.is_truncated = context.is_truncated or is_truncated_flag
+                await fetch_and_truncate_context(repo, context.issue_number, context)
 
         elif event_type == "discussion":
             discussion = payload.get("discussion", {})
