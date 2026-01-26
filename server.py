@@ -1,8 +1,9 @@
-import os, json, logging, asyncio, datetime
+import os, json, logging, asyncio, re
 from typing import Dict, Any, Optional, List, Set
 from fastapi import FastAPI
 from pydantic import BaseModel
 import httpx
+from datetime import datetime
 
 # --- 配置 ---
 GITHUB_API = "https://api.github.com"
@@ -18,7 +19,6 @@ logger = logging.getLogger("BotWatcher")
 # Headers
 bot_headers = {"Authorization": f"token {BOT_TOKEN}", "Accept": "application/vnd.github.v3+json"}
 user_rest_headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-# 用于抓取 Diff
 diff_headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3.diff"}
 
 app = FastAPI()
@@ -31,7 +31,7 @@ class TimelineItem(BaseModel):
     body: str
     created_at: str
     user: str
-    type: str # 'comment', 'review', 'review_comment'
+    type: str # 'comment', 'code_comment', 'review_summary'
 
 class TaskContext(BaseModel):
     repo: str
@@ -40,36 +40,41 @@ class TaskContext(BaseModel):
     trigger_user: Optional[str] = None
     issue_number: Optional[int] = None
     title: Optional[str] = None
-    base_body: Optional[str] = None # Issue/PR 的原始 Body
-    timeline_text: Optional[str] = None # 处理后的时间线文本
-    diff_content: Optional[str] = None # PR Diff (截断)
+    base_body: Optional[str] = None 
+    timeline_text: Optional[str] = None 
+    diff_content: Optional[str] = None 
     clone_url: Optional[str] = None
 
-# --- 核心算法：1:3 手风琴折叠 ---
-def compress_timeline(items: List[TimelineItem], max_chars: int = 10000) -> str:
-    """
-    策略：最早取1条，最新取3条，循环直到填满 max_chars。
-    """
-    if not items:
-        return ""
+# --- 工具函数 ---
+def parse_iso_time(t_str):
+    try:
+        return datetime.fromisoformat(t_str.replace('Z', '+00:00'))
+    except:
+        return datetime.now()
 
-    # 按时间排序
+def compress_timeline(items: List[TimelineItem], max_chars: int = 12000) -> str:
+    """
+    1:3 手风琴策略：时间排序后，最早取1条，最新取3条，循环直到填满。
+    """
+    if not items: return ""
+    
+    # 必须按时间严格排序，否则上下文乱套
     items.sort(key=lambda x: x.created_at)
     
     selected_indices = set()
     head_ptr = 0
     tail_ptr = len(items) - 1
     current_chars = 0
-
+    
     while head_ptr <= tail_ptr:
-        # 1. 尝试取头部 1 条
+        # 尝试取头部
         if current_chars + len(items[head_ptr].body) > max_chars: break
         selected_indices.add(head_ptr)
         current_chars += len(items[head_ptr].body)
         head_ptr += 1
         if head_ptr > tail_ptr: break
 
-        # 2. 尝试取尾部 3 条
+        # 尝试取尾部 3 条
         for _ in range(3):
             if head_ptr > tail_ptr: break
             if current_chars + len(items[tail_ptr].body) > max_chars: break
@@ -77,178 +82,177 @@ def compress_timeline(items: List[TimelineItem], max_chars: int = 10000) -> str:
             current_chars += len(items[tail_ptr].body)
             tail_ptr -= 1
 
-    # 重构文本
     final_text = []
     sorted_indices = sorted(list(selected_indices))
     last_idx = -1
 
     for idx in sorted_indices:
-        # 检测断层
         if idx > last_idx + 1:
-            omitted_count = idx - last_idx - 1
-            final_text.append(f"\n... [系统提示: 中间省略了 {omitted_count} 条讨论] ...\n")
+            omitted = idx - last_idx - 1
+            final_text.append(f"\n... [Skipped {omitted} items] ...\n")
         
         item = items[idx]
-        final_text.append(f"--- {item.created_at} @{item.user} ({item.type}) ---\n{item.body}")
+        final_text.append(f"--- {item.created_at[:19]} @{item.user} [{item.type}] ---\n{item.body}")
         last_idx = idx
 
     return "\n\n".join(final_text)
 
-# --- 数据抓取 ---
+# --- 抓取逻辑 ---
 
 async def fetch_diff(client: httpx.AsyncClient, pull_url: str) -> str:
     try:
         r = await client.get(pull_url, headers=diff_headers)
-        if r.status_code == 200:
-            return r.text[:3000] # Diff 通常很长，限制一下
-    except: pass
-    return ""
+        return r.text[:4000] if r.status_code == 200 else ""
+    except: return ""
 
-async def fetch_issue_timeline(client: httpx.AsyncClient, issue_url: str) -> List[TimelineItem]:
-    # 抓取所有 Issue Comments
+async def fetch_full_pr_context(client: httpx.AsyncClient, issue_url: str, pull_url: str) -> List[TimelineItem]:
+    """
+    抓取 PR 的全量上下文：包括普通对话、代码 Review 对话、以及 Review 总结
+    """
     items = []
-    page = 1
-    while True:
-        r = await client.get(f"{issue_url}/comments", headers=user_rest_headers, params={"per_page": 100, "page": page})
-        if r.status_code != 200 or not r.json(): break
-        for c in r.json():
-            items.append(TimelineItem(id=c["id"], body=c.get("body") or "", created_at=c["created_at"], user=c["user"]["login"], type="comment"))
-        if len(r.json()) < 100: break
-        page += 1
-    return items
-
-async def fetch_pr_timeline_mixed(client: httpx.AsyncClient, issue_url: str, pull_url: str) -> List[TimelineItem]:
-    # 混合抓取：Issue Comments + Review Comments
-    items = await fetch_issue_timeline(client, issue_url)
     
-    # 获取 Reviews (简化版，只抓取 top level review body)
-    r = await client.get(f"{pull_url}/reviews", headers=user_rest_headers)
-    if r.status_code == 200:
-        for rev in r.json():
+    # 1. 普通 Issue Comments
+    r1 = await client.get(f"{issue_url}/comments", headers=user_rest_headers)
+    if r1.status_code == 200:
+        for c in r1.json():
+            items.append(TimelineItem(
+                id=c["id"], body=c.get("body") or "", created_at=c["created_at"], 
+                user=c["user"]["login"], type="comment"
+            ))
+
+    # 2. Review Comments (代码行内评论)
+    # 注意：这里必须用 /pulls/ 路径
+    r2 = await client.get(f"{pull_url}/comments", headers=user_rest_headers)
+    if r2.status_code == 200:
+        for c in r2.json():
+            items.append(TimelineItem(
+                id=c["id"], body=f"[File: {c.get('path')}]\n{c.get('body')}", 
+                created_at=c["created_at"], user=c["user"]["login"], type="code_comment"
+            ))
+
+    # 3. Review Summaries (Review 批次总结)
+    r3 = await client.get(f"{pull_url}/reviews", headers=user_rest_headers)
+    if r3.status_code == 200:
+        for rev in r3.json():
             if rev.get("body"):
-                items.append(TimelineItem(id=rev["id"], body=rev["body"], created_at=rev["submitted_at"] or rev["key"], user=rev["user"]["login"], type="review"))
-    return items
-
-async def fetch_review_batch(client: httpx.AsyncClient, pull_url: str, review_id: int) -> str:
-    # 专门处理 PR Review 场景：抓取同批次的 Review 详情
-    text = ""
-    # 1. 获取 Review 本身
-    r = await client.get(f"{pull_url}/reviews/{review_id}", headers=user_rest_headers)
-    if r.status_code == 200:
-        data = r.json()
-        text += f"--- Review Summary by @{data['user']['login']} ---\n{data.get('body') or 'No summary'}\n\n"
+                items.append(TimelineItem(
+                    id=rev["id"], body=f"[Review Status: {rev['state']}]\n{rev['body']}", 
+                    created_at=rev.get("submitted_at") or rev["id"], # fallback
+                    user=rev["user"]["login"], type="review_summary"
+                ))
     
-    # 2. 获取该 Review 下的具体代码评论
-    r_comments = await client.get(f"{pull_url}/reviews/{review_id}/comments", headers=user_rest_headers)
-    if r_comments.status_code == 200:
-        for c in r_comments.json():
-            text += f"[File: {c['path']}:{c.get('line', '?')}]\n{c['body']}\n---\n"
-    return text
-
-# --- 主逻辑 ---
+    return items
 
 async def handle_note(client: httpx.AsyncClient, note: Dict):
     subject = note["subject"]
+    repo_full = note["repository"]["full_name"]
+    # 强制修正：如果 API 返回的 url 包含 /issues/ 但类型是 PullRequest，替换为 /pulls/
+    # GitHub 通知里，PR 的 subject.url 经常是 https://api.github.com/repos/x/y/issues/123
+    # 我们需要 https://api.github.com/repos/x/y/pulls/123 来抓 Diff 和 Reviews
+    raw_url = subject["url"]
+    pull_url = raw_url.replace("/issues/", "/pulls/")
+    issue_url = raw_url.replace("/pulls/", "/issues/") # 确保能访问 comments
+
     context = TaskContext(
-        repo=note["repository"]["full_name"],
+        repo=repo_full,
         event_type=subject["type"].lower(),
         event_id=note["id"],
         clone_url=note["repository"]["html_url"] + ".git"
     )
 
     try:
-        # 1. 获取基础详情 (Issue/PR/Discussion)
-        detail_resp = await client.get(subject["url"], headers=user_rest_headers)
-        if detail_resp.status_code != 200: return
-        detail = detail_resp.json()
+        # 1. 抓取基础详情 (Title, Base Body)
+        # 尽量用 issue_url 抓基础信息，通用性好
+        detail_resp = await client.get(issue_url, headers=user_rest_headers)
+        if detail_resp.status_code != 200:
+            # 如果失败，可能是真正的 Issue 没转过来，尝试 pull_url
+            detail_resp = await client.get(pull_url, headers=user_rest_headers)
+            if detail_resp.status_code != 200:
+                logger.error(f"Failed to fetch details: {detail_resp.status_code}")
+                return
         
+        detail = detail_resp.json()
         context.issue_number = detail.get("number")
         context.title = detail.get("title")
         context.base_body = detail.get("body") or ""
-        context.trigger_user = detail.get("user", {}).get("login") # 默认为作者
+        context.trigger_user = detail.get("user", {}).get("login") # 默认触发者为作者
 
-        # 确定触发源 (Trigger Source)
-        latest_comment_url = subject.get("latest_comment_url")
-        trigger_type = "unknown"
-        trigger_body = ""
-        
-        # 尝试通过 latest_comment_url 锁定触发者
-        if latest_comment_url:
-            lc_resp = await client.get(latest_comment_url, headers=user_rest_headers)
+        # 2. 锁定触发者和具体任务指令
+        target_task = ""
+        if subject.get("latest_comment_url"):
+            lc_resp = await client.get(subject["latest_comment_url"], headers=user_rest_headers)
             if lc_resp.status_code == 200:
                 lc_data = lc_resp.json()
-                # 区分是普通评论还是 Review 评论
-                if "pull_request_review_id" in lc_data:
-                    trigger_type = "review_comment"
-                    context.trigger_user = lc_data["user"]["login"]
-                    # 记录 Review ID 用于后续抓取
-                    review_id = lc_data["pull_request_review_id"]
-                else:
-                    trigger_type = "comment"
-                    context.trigger_user = lc_data.get("user", {}).get("login") or lc_data.get("author", {}).get("login")
-                    trigger_body = lc_data.get("body")
+                context.trigger_user = lc_data.get("user", {}).get("login") or context.trigger_user
+                target_task = lc_data.get("body") or ""
+                logger.info(f"Trigger found from comment: {context.trigger_user}")
+            else:
+                logger.warning(f"Could not fetch latest comment: {lc_resp.status_code}")
 
-        # 权限校验
-        if ALLOWED_USERS and context.trigger_user not in ALLOWED_USERS: return
+        # 3. 权限拦截 (增加显式日志)
+        if ALLOWED_USERS:
+            if context.trigger_user not in ALLOWED_USERS:
+                logger.warning(f"⛔ Ignored: User '{context.trigger_user}' not in allowed list.")
+                return
+            else:
+                logger.info(f"✅ User '{context.trigger_user}' authorized.")
 
-        # --- 分支逻辑：PR Review vs 时间线 ---
+        # 4. 构建上下文 (Diff & Timeline)
+        timeline_items = []
         
-        # 场景 A: PR 且来自 Review (Review Batch 模式)
-        if subject["type"] == "PullRequest" and trigger_type == "review_comment":
-            logger.info("Processing PR Review Batch context...")
+        if subject["type"] == "PullRequest":
+            logger.info(f"Processing PR #{context.issue_number}...")
             # 抓取 Diff
-            context.diff_content = await fetch_diff(client, subject["url"])
-            # 抓取同批次 Review
-            context.timeline_text = await fetch_review_batch(client, subject["url"], review_id)
-            final_task = "Attention: Focus on the code review comments provided in the timeline."
+            context.diff_content = await fetch_diff(client, pull_url)
+            # 混合抓取所有评论和Review
+            timeline_items = await fetch_full_pr_context(client, issue_url, pull_url)
+        
+        elif subject["type"] == "Issue":
+            # 抓取 Issue Comments
+            r = await client.get(f"{issue_url}/comments", headers=user_rest_headers)
+            if r.status_code == 200:
+                for c in r.json():
+                    timeline_items.append(TimelineItem(
+                        id=c["id"], body=c.get("body") or "", created_at=c["created_at"],
+                        user=c["user"]["login"], type="comment"
+                    ))
+        
+        elif subject["type"] == "Discussion":
+            target_task = target_task or context.base_body
 
-        # 场景 B: Issue / Discussion / PR 普通评论 (时间线模式)
-        else:
-            logger.info("Processing Timeline Mode (1:3 Strategy)...")
-            timeline_items = []
-            
-            if subject["type"] == "PullRequest":
-                # PR 需要混合抓 Diff, Comment 和 Review
-                context.diff_content = await fetch_diff(client, subject["url"])
-                timeline_items = await fetch_pr_timeline_mixed(client, detail["url"], subject["url"]) # detail['url'] is issue_url
-            
-            elif subject["type"] == "Issue":
-                timeline_items = await fetch_issue_timeline(client, subject["url"])
-                
-            elif subject["type"] == "Discussion":
-                # Discussion 逻辑保持简单抓取，或者需要 GraphQL 实现完整时间线，这里暂略，使用基础正文
-                trigger_body = trigger_body or context.base_body
+        # 5. 执行 1:3 压缩
+        if timeline_items:
+            context.timeline_text = compress_timeline(timeline_items)
+            logger.info(f"Timeline compressed. Total items: {len(timeline_items)}")
 
-            # 执行 1:3 压缩策略
-            context.timeline_text = compress_timeline(timeline_items, max_chars=10000)
-            
-            # 任务指令 = 触发那条评论的内容 (如果能抓到)
-            final_task = trigger_body or context.base_body
-
-        # --- 触发 Workflow ---
+        # 6. 兜底任务文本
+        final_task = target_task or context.base_body or "Analyze this context"
+        
         await trigger_workflow(client, context, final_task)
 
     except Exception as e:
         logger.error(f"Handle Error: {e}", exc_info=True)
 
 async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_text: str):
-    # 构造发给 LLM 的最终 prompt
-    # 我们将 "时间线" 和 "Diff" 组装进 Context
-    # Task 字段只放核心指令
-    
     payload = ctx.model_dump()
-    payload_str = json.dumps(payload) # 使用 json.dumps 而不是 model_dump_json 以便控制
+    payload_str = json.dumps(payload)
     
-    # 再次兜底检查总长度，如果太长，砍掉 Diff
-    if len(payload_str) > 60000 and ctx.diff_content:
-        ctx.diff_content = "[Diff Truncated due to size limit]"
-        payload_str = ctx.model_dump_json()
+    # 保护截断
+    if len(payload_str) > 60000:
+        if ctx.diff_content:
+            ctx.diff_content = "[Diff Truncated]"
+            payload_str = json.dumps(ctx.model_dump())
+        if len(payload_str) > 60000:
+            ctx.timeline_text = ctx.timeline_text[:5000] + "\n[Timeline Truncated]"
+            payload_str = json.dumps(ctx.model_dump())
 
     url = f"{GITHUB_API}/repos/{CONTROL_REPO}/actions/workflows/llm-bot-runner.yml/dispatches"
+    logger.info(f"Dispatching workflow for {ctx.event_id}...")
+    
     r = await client.post(url, headers=user_rest_headers, json={
         "ref": "main", 
         "inputs": {
-            "task": task_text[:2000], 
+            "task": task_text[:3000], 
             "context": payload_str
         }
     })
@@ -256,28 +260,34 @@ async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_tex
     if r.status_code == 204:
         await client.patch(f"{GITHUB_API}/notifications/threads/{ctx.event_id}", headers=bot_headers)
         with open(PROCESSED_LOG, "a") as f: f.write(f"{ctx.event_id}\n")
-        logger.info(f"Triggered: {ctx.event_id} | User: {ctx.trigger_user}")
+        logger.info(f"🚀 Triggered successfully! Task: {task_text[:20]}...")
+    else:
+        logger.error(f"❌ Dispatch failed: {r.status_code} {r.text}")
 
-# --- 轮询逻辑 (含重试) ---
 async def poll_loop():
     async with httpx.AsyncClient(timeout=30.0) as client:
         while True:
             try:
                 curr_headers = bot_headers.copy()
                 if state["last_modified"]: curr_headers["If-Modified-Since"] = state["last_modified"]
+                
                 resp = await client.get(f"{GITHUB_API}/notifications", headers=curr_headers, params={"all": "false"})
                 state["poll_interval"] = max(10, int(resp.headers.get("X-Poll-Interval", 30)))
                 
                 if resp.status_code == 200:
                     state["last_modified"] = resp.headers.get("Last-Modified")
-                    for note in resp.json():
-                        if note["reason"] in ["mention", "team_mention", "review_requested"] and note["id"] not in processed_cache:
+                    notes = resp.json()
+                    if notes: logger.info(f"Received {len(notes)} notifications.")
+                    for note in notes:
+                        # 增加 review_requested 的支持，如果你想让 bot 被 review 时也触发
+                        if note["reason"] in ["mention", "team_mention"] and note["id"] not in processed_cache:
                             processed_cache.add(note["id"])
                             asyncio.create_task(handle_note(client, note))
                 elif resp.status_code == 403:
+                    logger.warning("Rate limit hit, sleeping 2m.")
                     await asyncio.sleep(120)
             except Exception as e:
-                logger.error(f"Poll Error: {e}. Retry in 5s...")
+                logger.error(f"Poll loop error: {e}")
                 await asyncio.sleep(5)
                 continue
             await asyncio.sleep(state["poll_interval"])
