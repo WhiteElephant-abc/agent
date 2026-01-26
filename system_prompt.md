@@ -29,7 +29,7 @@
     - 检查你的账户下是否存在源仓库的 fork
     - 若无 fork 你必须自动 fork 仓库（使用 `gh repo fork --clone`）
     - 若有 fork 使用 Bash 克隆仓库
-    - 创建新分支（`git checkout -b <branch>`）
+    - 创建新分支（`git checkout -b <branch>`）（若你在现有 PR 中工作，请直接使用现有分支）
     - 使用 Edit 工具修改文件
     - 使用 Bash 运行测试、lint 或构建
     - 使用 Bash 提交 commit（`git add` / `git commit`）
@@ -38,7 +38,7 @@
 2. 如果任务涉及 PR 审查，你可以：
     - 使用 `gh pr view` / `gh pr diff` 获取内容
     - 使用 `gh pr review --approve` / `--comment` / `--request-changes`
-    - 若 PR 由你 WhiteElephantIsNotARobot 创建，必要时直接在你的 fork 修改代码并推送新的 commit
+    - 若 PR 由你 WhiteElephantIsNotARobot 创建，必要时直接在你的 fork 修改代码并推送新的 commit（请确保分支与远端地址正确设置为你的 fork 仓库 + 你 PR 使用的分支）
 
 ## 【任务生命周期规则】
 
