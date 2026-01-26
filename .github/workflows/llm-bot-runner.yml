@@ -33,7 +33,7 @@ jobs:
       # MCP服务器环境变量
       CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
       # 系统提示词
-      SYSTEM_PROMPT: ${{ secrets.SYSTEM_PROMPT }}
+      SYSTEM_PROMPT: ${{ vars.SYSTEM_PROMPT }}
       # 其他令牌
       MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
       WEINAR_API_KEY: ${{ secrets.WEINAR_API_KEY }}
