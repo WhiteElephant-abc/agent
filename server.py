@@ -142,20 +142,51 @@ async def trigger_workflow(ctx: TaskContext, task_content: str):
             logger.info(f"Workflow dispatched. Task: {final_task[:30]}... ID: {ctx.event_id}")
 
 async def poll_loop():
+    # 你可以手动指定一个基础频率，比如 30 秒
+    base_interval = 30 
+    
     async with httpx.AsyncClient(timeout=30.0) as client:
         while True:
             try:
                 curr_headers = bot_headers.copy()
-                if state["last_modified"]: curr_headers["If-Modified-Since"] = state["last_modified"]
+                if state["last_modified"]: 
+                    curr_headers["If-Modified-Since"] = state["last_modified"]
+                
                 resp = await client.get(f"{GITHUB_API}/notifications", headers=curr_headers, params={"all": "false"})
-                state["poll_interval"] = int(resp.headers.get("X-Poll-Interval", 60))
+                
+                # 更新下一次轮询的间隔（优先遵循 GitHub 建议，但设定上限和下限）
+                github_interval = int(resp.headers.get("X-Poll-Interval", base_interval))
+                state["poll_interval"] = max(10, min(github_interval, 60)) 
+                
                 if resp.status_code == 200:
                     state["last_modified"] = resp.headers.get("Last-Modified")
-                    for note in resp.json():
+                    notes = resp.json()
+                    if notes:
+                        logger.info(f"Got {len(notes)} new notifications.")
+                    for note in notes:
                         if note["reason"] in ["mention", "team_mention"] and note["id"] not in processed_cache:
-                            processed_cache.add(note["id"]) 
+                            processed_cache.add(note["id"])
                             asyncio.create_task(handle_note(client, note))
-            except Exception as e: logger.error(f"Poll Error: {e}")
+                
+                elif resp.status_code == 304:
+                    # 304 意味着没变，我们可以保持安静，或者打印一个点表示在运行
+                    pass 
+                
+                elif resp.status_code == 403:
+                    logger.warning("Rate limit hit or forbidden. Sleeping longer...")
+                    state["poll_interval"] = 120 # 被限流了就多歇会儿
+
+            except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
+                logger.error(f"Network Error: {e}. Retrying in 5s...")
+                await asyncio.sleep(5) # 网络波动导致的断开，5秒后重试
+                continue # 跳过下面的正常 sleep
+
+            except Exception as e:
+                logger.error(f"Poll Error: {e}. Retrying in 10s...")
+                await asyncio.sleep(10)
+                continue
+
+            # 正常情况下等待设定的间隔
             await asyncio.sleep(state["poll_interval"])
 
 @app.on_event("startup")
