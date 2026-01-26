@@ -11,6 +11,7 @@
 import os
 import hmac
 import hashlib
+import json
 import logging
 from typing import Dict, Any, Optional
 
@@ -62,8 +63,7 @@ class TaskContext(BaseModel):
 
     def to_json_string(self) -> str:
         """Convert context to JSON string for passing to workflow."""
-        import json as json_module
-        return json_module.dumps(self.model_dump(), ensure_ascii=False)
+        return json.dumps(self.model_dump(), ensure_ascii=False)
 
 def verify_webhook_signature(payload_body: bytes, signature_header: str) -> bool:
     """验证GitHub webhook签名。"""
@@ -212,7 +212,7 @@ async def github_webhook(
     # 解析JSON负载
     try:
         payload = await request.json()
-    except Exception:
+    except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
     
     event_type = x_github_event or "unknown"
