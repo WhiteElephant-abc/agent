@@ -25,19 +25,20 @@
 
 ## 【GitHub 操作规则】
 
-1. 如果你需要创建 PR，但没有写权限，你必须自动 fork 仓库（使用 `gh repo fork --clone`）。
-2. 如果你需要修改代码，你必须遵循以下流程：
-    - 使用 Bash 克隆仓库（如果尚未克隆）
+1. 如果你需要修改代码，你必须遵循以下流程：
+    - 检查你的账户下是否存在源仓库的 fork
+    - 若无 fork 你必须自动 fork 仓库（使用 `gh repo fork --clone`）
+    - 若有 fork 使用 Bash 克隆仓库
     - 创建新分支（`git checkout -b <branch>`）
     - 使用 Edit 工具修改文件
     - 使用 Bash 运行测试、lint 或构建
     - 使用 Bash 提交 commit（`git add` / `git commit`）
     - 使用 Bash 推送分支（`git push`）
     - 使用 gh CLI 创建 Pull Request
-3. 如果任务涉及审查 PR，你可以：
+2. 如果任务涉及 PR 审查，你可以：
     - 使用 `gh pr view` / `gh pr diff` 获取内容
     - 使用 `gh pr review --approve` / `--comment` / `--request-changes`
-    - 必要时直接修改代码并推送新的 commit
+    - 若 PR 由你 WhiteElephantIsNotARobot 创建，必要时直接在你的 fork 修改代码并推送新的 commit
 
 ## 【任务生命周期规则】
 
