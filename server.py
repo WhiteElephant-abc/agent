@@ -11,7 +11,6 @@
 import os
 import hmac
 import hashlib
-import json
 import logging
 from typing import Dict, Any, Optional
 
@@ -30,6 +29,9 @@ GITHUB_API = "https://api.github.com"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 CONTROL_REPO = os.getenv("CONTROL_REPO", "owner/llm-bot-control")
+
+# Bot mentions for filtering comments
+BOT_MENTIONS = ("@llm-bot-dev", "@WhiteElephantIsNotARobot")
 
 # GitHub API 请求头
 headers = {
@@ -60,8 +62,8 @@ class TaskContext(BaseModel):
 
     def to_json_string(self) -> str:
         """Convert context to JSON string for passing to workflow."""
-        import json
-        return json.dumps(self.model_dump(), ensure_ascii=False)
+        import json as json_module
+        return json_module.dumps(self.model_dump(), ensure_ascii=False)
 
 def verify_webhook_signature(payload_body: bytes, signature_header: str) -> bool:
     """验证GitHub webhook签名。"""
@@ -112,8 +114,11 @@ def extract_context_from_event(event_type: str, payload: Dict[str, Any], event_i
             context.trigger_user = pr.get("user", {}).get("login")
             context.pr_title = pr.get("title")
             context.pr_body = pr.get("body")
-            # GitHub webhook payload中的diff_url可能不存在，需要从其他字段获取
-            context.pr_diff_url = pr.get("diff_url") or pr.get("html_url") + ".diff" if pr.get("html_url") else None
+            # GitHub webhook payload中的diff_url可能不存在, construct from html_url
+            html_url = pr.get("html_url")
+            context.pr_diff_url = pr.get("diff_url")
+            if not context.pr_diff_url and html_url:
+                context.pr_diff_url = f"{html_url}.diff"
         elif event_type == "pull_request_review":
             pr = payload.get("pull_request", {})
             review = payload.get("review", {})
@@ -146,7 +151,7 @@ def generate_task_description(event_type: str, context: TaskContext) -> str:
     elif event_type == "pull_request_review":
         return f"Review the review comment on PR #{context.issue_number} in {context.repo} and respond appropriately."
     elif event_type == "issue_comment":
-        if context.comment_body and ("@llm-bot-dev" in context.comment_body or "@WhiteElephantIsNotARobot" in context.comment_body):
+        if context.comment_body and any(mention in context.comment_body for mention in BOT_MENTIONS):
             return f"Respond to comment on issue #{context.issue_number} in {context.repo}."
         # Only process comments that mention the bot, otherwise return a skip indicator
         return f"SKIP: Comment on issue #{context.issue_number} in {context.repo} does not mention the bot."
@@ -207,7 +212,7 @@ async def github_webhook(
     # 解析JSON负载
     try:
         payload = await request.json()
-    except json.JSONDecodeError:
+    except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
     
     event_type = x_github_event or "unknown"
