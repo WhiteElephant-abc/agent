@@ -18,98 +18,91 @@ jobs:
     env:
       LLM_TASK: ${{ inputs.task }}
       LLM_CONTEXT: ${{ inputs.context }}
+      # GitHub身份令牌（4个名称都设置）
+      GITHUB_TOKEN: ${{ secrets.WEINAR_API_KEY }}
+      GH_TOKEN: ${{ secrets.WEINAR_API_KEY }}
       GITHUBTOKEN: ${{ secrets.WEINAR_API_KEY }}
       GHTOKEN: ${{ secrets.WEINAR_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # Claude Code环境变量配置
+      ANTHROPIC_API_KEY: ${{ secrets.MIMO_API_KEY }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.MIMO_API_KEY }}
+      ANTHROPIC_BASE_URL: "https://api.xiaomimimo.com/anthropic"
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "mimo-v2-flash"
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "mimo-v2-flash"
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "mimo-v2-flash"
+      # MCP服务器环境变量
+      CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
+      # 系统提示词
+      SYSTEM_PROMPT: ${{ secrets.SYSTEM_PROMPT }}
+      # 其他令牌
+      MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
+      WEINAR_API_KEY: ${{ secrets.WEINAR_API_KEY }}
     permissions:
       contents: write
       pull-requests: write
       issues: write
       discussions: write
     steps:
-      - name: 检出控制仓库（包含Claude/MCP配置）
+      - name: 检出控制仓库
         uses: actions/checkout@v4
-
-      - name: 准备Claude Code配置
-        run: |
-          mkdir -p ~/.claude
-          if [ -d .claude ]; then
-            cp -r .claude/* ~/.claude/
-          fi
-          if [ -f claude.config.json ]; then
-            cp claude.config.json ~/.claude/config.json
-          fi
-          if [ -f mcp.config.json ]; then
-            cp mcp.config.json ~/.claude/mcp.config.json
-          fi
-      
-      - name: 加载系统提示词
-        run: |
-          mkdir -p ~/.claude
-          if [ -f system_prompt.txt ]; then
-            cp system_prompt.txt ~/.claude/system_prompt.txt
-            echo "SYSTEM_PROMPT_FILE=~/.claude/system_prompt.txt" >> $GITHUB_ENV
-          else
-            echo "Using default system prompt"
-            echo 'SYSTEM_PROMPT=You are an AI assistant with full control over a dedicated GitHub account (llm-bot-dev).' >> $GITHUB_ENV
-          fi
-
-      - name: 验证配置和令牌
-        run: |
-          echo "Validating configuration files..."
-          if [ ! -f ~/.claude/config.json ]; then
-            echo "Error: config.json not found"
-            exit 1
-          fi
-          if [ ! -f ~/.claude/mcp.config.json ]; then
-            echo "Warning: mcp.config.json not found"
-          fi
-          if [ -z "$GITHUBTOKEN" ]; then
-            echo "Error: GITHUBTOKEN not set"
-            exit 1
-          else
-            echo "Checking GitHub token access..."
-            gh auth status || exit 1
-          fi
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "Error: ANTHROPIC_API_KEY not set"
-            exit 1
-          else
-            echo "Anthropic API key is set"
-          fi
 
       - name: 安装Claude CLI
         run: |
           curl -sSL https://install.anthropic.com | sh
 
-      - name: 以GitHub机器人身份运行Claude Code
+      - name: 安装uv包管理器
+        uses: astral-sh/setup-uv@v7
+
+      - name: 验证令牌和环境变量
         run: |
-          if [ -f ~/.claude/system_prompt.txt ]; then
-             claude \
-               -p "$LLM_TASK" \
-               --append-user-prompt "$LLM_CONTEXT" \
-               --system-prompt-file ~/.claude/system_prompt.txt \
-               --allowedTools "Bash, TaskOutput, Edit, ExitPlanMode, Glob, Grep, KillShell, MCPSearch, NotebookEdit, Read, Skill, Task, TaskCreate, TaskGet, TaskList, TaskUpdate, WebFetch, WebSearch, Write"
-          elif [ -n "$SYSTEM_PROMPT" ]; then
-             claude \
-               -p "$LLM_TASK" \
-               --append-user-prompt "$LLM_CONTEXT" \
-               --system-prompt "$SYSTEM_PROMPT" \
-               --allowedTools "Bash, TaskOutput, Edit, ExitPlanMode, Glob, Grep, KillShell, MCPSearch, NotebookEdit, Read, Skill, Task, TaskCreate, TaskGet, TaskList, TaskUpdate, WebFetch, WebSearch, Write"
+          echo "验证环境变量..."
+          # 验证GitHub令牌
+          if [ -z "$GITHUB_TOKEN" ]; then
+            echo "错误: GITHUB_TOKEN未设置"
+            exit 1
           else
-             claude \
-               -p "$LLM_TASK" \
-               --append-user-prompt "$LLM_CONTEXT" \
-               --allowedTools "Bash, TaskOutput, Edit, ExitPlanMode, Glob, Grep, KillShell, MCPSearch, NotebookEdit, Read, Skill, Task, TaskCreate, TaskGet, TaskList, TaskUpdate, WebFetch, WebSearch, Write"
+            echo "GitHub令牌已设置"
+          fi
+          # 验证Anthropic认证令牌
+          if [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
+            echo "错误: ANTHROPIC_AUTH_TOKEN未设置"
+            exit 1
+          else
+            echo "Anthropic认证令牌已设置"
+          fi
+          # 验证系统提示词
+          if [ -z "$SYSTEM_PROMPT" ]; then
+            echo "错误: SYSTEM_PROMPT未设置"
+            exit 1
+          else
+            echo "系统提示词已设置"
+          fi
+
+      - name: 添加MCP服务器
+        run: |
+          # 添加DuckDuckGo搜索服务器
+          echo "添加DuckDuckGo搜索服务器..."
+          claude mcp add ddg-search -- uvx duckduckgo-mcp-server
+
+          # 添加Context7 HTTP服务器（如果CONTEXT7_API_KEY已设置）
+          if [ -n "$CONTEXT7_API_KEY" ]; then
+            echo "添加Context7 HTTP服务器..."
+            claude mcp add --transport http context7 https://mcp.context7.com/mcp \
+              --header "CONTEXT7_API_KEY: $CONTEXT7_API_KEY"
+          else
+            echo "警告: CONTEXT7_API_KEY未设置，跳过Context7服务器添加"
           fi
         env:
-          GITHUB_TOKEN: ${{ secrets.WEINAR_API_KEY }}
-          GH_TOKEN: ${{ secrets.WEINAR_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
-          WEINAR_API_KEY: ${{ secrets.WEINAR_API_KEY }}
-          ANTHROPIC_BASE_URL: "https://api.xiaomimimo.com/anthropic"
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.MIMO_API_KEY }}
-          ANTHROPIC_DEFAULT_OPUS_MODEL: "mimo-v2-flash"
-          ANTHROPIC_DEFAULT_SONNET_MODEL: "mimo-v2-flash"
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: "mimo-v2-flash"
+          CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
+
+      - name: 以GitHub机器人身份运行Claude Code
+        run: |
+          echo "运行Claude Code..."
+          echo "任务: $LLM_TASK"
+          echo "系统提示词长度: ${#SYSTEM_PROMPT} 字符"
+
+          claude \
+            -p "$LLM_TASK" \
+            --append-user-prompt "$LLM_CONTEXT" \
+            --system-prompt "$SYSTEM_PROMPT" \
+            --allowedTools "Bash, TaskOutput, Edit, ExitPlanMode, Glob, Grep, KillShell, MCPSearch, NotebookEdit, Read, Skill, Task, TaskCreate, TaskGet, TaskList, TaskUpdate, WebFetch, WebSearch, Write, mcp__ddg-search__*, mcp__context7__*"
