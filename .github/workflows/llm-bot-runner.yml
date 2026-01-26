@@ -76,6 +76,26 @@ jobs:
             echo "系统提示词已设置"
           fi
 
+      - name: 初始化Git配置
+        run: |
+          echo "初始化Git配置（使用GitHub Token）..."
+
+          # 配置全局Git用户信息
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 配置GitHub Token用于HTTPS访问
+          git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "git@github.com:"
+
+          # 配置gh CLI使用token
+          gh auth status || echo "使用token进行认证..."
+
+          # 验证Git配置
+          echo "Git配置验证:"
+          git config --global --list | grep -E "user\.|url\." || echo "Git配置完成"
+          echo "Git配置已初始化完成"
+
       - name: 添加MCP服务器
         run: |
           # 添加DuckDuckGo搜索服务器
