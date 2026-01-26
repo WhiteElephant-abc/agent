@@ -124,5 +124,5 @@ jobs:
             --system-prompt "$SYSTEM_PROMPT" \
             --allowedTools "Bash,TaskOutput,Edit,ExitPlanMode,Glob,Grep,KillShell,MCPSearch,NotebookEdit,Read,Skill,Task,TaskCreate,TaskGet,TaskList,TaskUpdate,WebFetch,WebSearch,Write,mcp__ddg-search__*,mcp__context7__*" \
             --output-format=stream-json \
-            --verbose
+            --verbose \
             --continue
