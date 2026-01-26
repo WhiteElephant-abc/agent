@@ -100,9 +100,12 @@ jobs:
           echo "系统提示词长度: ${#SYSTEM_PROMPT} 字符"
 
           # 将JSON上下文写入文件
-          echo -n "$LLM_CONTEXT" > context.json
+          echo "$LLM_CONTEXT" > context.json
           CONTEXT_CHARS=$(wc -m < context.json)
           echo "上下文文件大小: $CONTEXT_CHARS 字符"
+          echo "上下文内容:"
+          cat context.json
+          echo ""
 
           # 构建新任务字符串，包含读取context.json的指示
           ENHANCED_TASK=$(printf "%s\n\n> 任务上下文已保存，共%s字符。阅读context.json文件以了解上下文！" "$LLM_TASK" "$CONTEXT_CHARS")
