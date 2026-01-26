@@ -43,8 +43,6 @@ jobs:
       issues: write
       discussions: write
     steps:
-      - name: 检出控制仓库
-        uses: actions/checkout@v4
 
       - name: 安装Claude CLI
         run: |
