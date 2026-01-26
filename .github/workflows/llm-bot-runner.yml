@@ -46,7 +46,7 @@ jobs:
 
       - name: 安装Claude CLI
         run: |
-          curl -sSL https://install.anthropic.com | sh
+          curl -fsSL https://claude.ai/install.sh | bash
 
       - name: 安装uv包管理器
         uses: astral-sh/setup-uv@v7
