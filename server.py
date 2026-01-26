@@ -97,6 +97,7 @@ class TaskContext(BaseModel):
     current_review_id: Optional[int] = Field(None, description="Current review ID if applicable")
     is_mention_in_body: Optional[bool] = Field(None, description="Whether bot is mentioned in issue/PR body")
     is_mention_in_review: Optional[bool] = Field(None, description="Whether bot is mentioned in review body")
+    is_truncated: Optional[bool] = Field(None, description="Whether context was truncated due to length limits")
 
     def to_json_string(self) -> str:
         """Convert context to JSON string for passing to workflow."""
@@ -165,77 +166,68 @@ async def fetch_specific_review_comments(repo: str, pr_number: int, review_id: i
             logger.error(f"Error fetching specific review comments for review {review_id}: {e}")
             return []
 
-def truncate_context_by_chars(items: list, max_chars: int) -> list:
+def truncate_context_by_chars(items: list, max_chars: int) -> tuple[list, bool]:
     """
-    按字符数智能截断内容，优先保留最新内容。
-    items: 按时间排序的列表，最早的在前（索引0），最新的在最后
-    算法：每添加3条最新评论（从后向前），尝试添加1条老评论（从前向后）
+    3新1老比例抓取 + 超限撤销 + 单边终止算法
+    items: 按时间正序排列（索引0是最老，索引-1是最新）
     """
     if not items:
-        return []
+        return [], False
 
-    total_chars = 0
     selected_indices = set()
+    total_chars = 0
 
-    left_idx = 0  # 老评论指针（向前移动）
-    right_idx = len(items) - 1  # 新评论指针（向后移动）
+    left_ptr = 0
+    right_ptr = len(items) - 1
 
-    # 计数器：新评论计数，每添加3条新评论尝试添加1条老评论
-    new_count = 0
-    old_count = 0
+    left_active = True   # 老评论端状态
+    right_active = True  # 新评论端状态
 
-    while left_idx <= right_idx and total_chars < max_chars:
-        # 优先添加新评论（从后往前）
-        if new_count < 3 and right_idx not in selected_indices:
-            item_text = str(items[right_idx])
+    while left_ptr <= right_ptr and (left_active or right_active):
+        # --- 尝试抓取新评论 (最多3条) ---
+        for _ in range(3):
+            if right_active and left_ptr <= right_ptr:
+                item_text = str(items[right_ptr])
+                if total_chars + len(item_text) <= max_chars:
+                    selected_indices.add(right_ptr)
+                    total_chars += len(item_text)
+                    right_ptr -= 1
+                else:
+                    # 关键逻辑：撤销本次添加并锁死右侧
+                    right_active = False
+                    break
+
+        # --- 尝试抓取老评论 (最多1条) ---
+        if left_active and left_ptr <= right_ptr:
+            item_text = str(items[left_ptr])
             if total_chars + len(item_text) <= max_chars:
-                selected_indices.add(right_idx)
+                selected_indices.add(left_ptr)
                 total_chars += len(item_text)
-                new_count += 1
-                right_idx -= 1
-                continue
+                left_ptr += 1
+            else:
+                # 关键逻辑：撤销本次添加并锁死左侧
+                left_active = False
 
-        # 每添加3条新评论后，尝试添加1条老评论
-        if new_count >= 3 and old_count < 1 and left_idx not in selected_indices:
-            item_text = str(items[left_idx])
-            if total_chars + len(item_text) <= max_chars:
-                selected_indices.add(left_idx)
-                total_chars += len(item_text)
-                old_count += 1
-                left_idx += 1
-                continue
+    # --- 后序处理：排序并生成结果 ---
+    sorted_indices = sorted(list(selected_indices))
+    result = []
 
-        # 如果新评论不满3条但右侧已无项目，尝试添加老评论
-        if (new_count < 3 and right_idx in selected_indices or right_idx < left_idx) and left_idx not in selected_indices:
-            item_text = str(items[left_idx])
-            if total_chars + len(item_text) <= max_chars:
-                selected_indices.add(left_idx)
-                total_chars += len(item_text)
-                left_idx += 1
-                continue
+    for i in range(len(sorted_indices)):
+        idx = sorted_indices[i]
+        result.append(items[idx])
 
-        # 如果老评论已加但新评论还不够3条且右侧还有项目，继续加新评论
-        if old_count >= 1 and new_count < 3 and right_idx not in selected_indices:
-            item_text = str(items[right_idx])
-            if total_chars + len(item_text) <= max_chars:
-                selected_indices.add(right_idx)
-                total_chars += len(item_text)
-                new_count += 1
-                right_idx -= 1
-                continue
+        # 插入截断声明 (Gap Notice)
+        if i < len(sorted_indices) - 1:
+            next_idx = sorted_indices[i+1]
+            if next_idx > idx + 1:
+                omitted = next_idx - idx - 1
+                result.append(json.dumps({
+                    "type": "system_notice",
+                    "content": f"--- [此处省略了中间 {omitted} 条历史评论] ---"
+                }))
 
-        # 如果计数器满足条件，重置以继续循环
-        if new_count >= 3 and old_count >= 1:
-            new_count = 0
-            old_count = 0
-            continue
-
-        # 如果以上条件都不满足，跳出循环
-        break
-
-    # 按原始顺序返回选中的项
-    result = [items[i] for i in sorted(selected_indices)]
-    return result
+    is_truncated = len(selected_indices) < len(items)
+    return result, is_truncated
 
 async def extract_context_from_event(event_type: str, payload: Dict[str, Any], event_id: str = "") -> TaskContext:
     """从GitHub webhook负载中提取相关上下文，包括历史数据。"""
@@ -292,9 +284,11 @@ async def extract_context_from_event(event_type: str, payload: Dict[str, Any], e
                         }
                         comment_texts.append(json.dumps(comment_data))
 
-                    truncated = truncate_context_by_chars(comment_texts, CONTEXT_MAX_CHARS)
+                    truncated, is_truncated_flag = truncate_context_by_chars(comment_texts, CONTEXT_MAX_CHARS)
                     # 解析回结构化数据
                     context.comments_history = [json.loads(item) for item in truncated]
+                    # 更新截断标志
+                    context.is_truncated = context.is_truncated or is_truncated_flag
 
         elif event_type == "pull_request":
             pr = payload.get("pull_request", {})
@@ -369,9 +363,11 @@ async def extract_context_from_event(event_type: str, payload: Dict[str, Any], e
                         }
                         review_texts.append(json.dumps(review_data))
 
-                    truncated = truncate_context_by_chars(review_texts, CONTEXT_MAX_CHARS)
+                    truncated, is_truncated_flag = truncate_context_by_chars(review_texts, CONTEXT_MAX_CHARS)
                     # 解析回结构化数据
                     context.reviews_history = [json.loads(item) for item in truncated]
+                    # 更新截断标志
+                    context.is_truncated = context.is_truncated or is_truncated_flag
 
         elif event_type == "pull_request_review_comment":
             pr = payload.get("pull_request", {})
@@ -408,8 +404,10 @@ async def extract_context_from_event(event_type: str, payload: Dict[str, Any], e
                         }
                         comment_texts.append(json.dumps(comment_data))
 
-                    truncated = truncate_context_by_chars(comment_texts, CONTEXT_MAX_CHARS)
+                    truncated, is_truncated_flag = truncate_context_by_chars(comment_texts, CONTEXT_MAX_CHARS)
                     context.comments_history = [json.loads(item) for item in truncated]
+                    # 更新截断标志
+                    context.is_truncated = context.is_truncated or is_truncated_flag
 
                 # 获取review历史
                 all_reviews = await fetch_pr_reviews(repo, context.issue_number)
@@ -425,8 +423,10 @@ async def extract_context_from_event(event_type: str, payload: Dict[str, Any], e
                         }
                         review_texts.append(json.dumps(review_data))
 
-                    truncated = truncate_context_by_chars(review_texts, CONTEXT_MAX_CHARS)
+                    truncated, is_truncated_flag = truncate_context_by_chars(review_texts, CONTEXT_MAX_CHARS)
                     context.reviews_history = [json.loads(item) for item in truncated]
+                    # 更新截断标志
+                    context.is_truncated = context.is_truncated or is_truncated_flag
 
         elif event_type == "discussion":
             discussion = payload.get("discussion", {})
