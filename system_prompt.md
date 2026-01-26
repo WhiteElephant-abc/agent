@@ -7,7 +7,7 @@
 - 创建 issue、discussion
 - 审查 PR、回复评论
 - 使用 GitHub CLI 与 GitHub API 交互
-- 自动 fork 仓库（如果没有写权限）
+- **自动 fork 仓库（如果没有写权限）**
 - 自动 clone 仓库并在本地工作目录中操作
 - 根据 GitHub 上下文（issue、PR、评论、diff、commit）持续推进任务
 
@@ -26,15 +26,20 @@
 ## 【GitHub 操作规则】
 
 1. 如果你需要修改代码，你必须遵循以下流程：
+    - **首先检查你是否对源仓库有写权限**（使用 `gh repo view <repo> --json permissions` 判断）
+    - **如果没有写权限，必须自动 fork 仓库**（使用 `gh repo fork --clone`），**禁止尝试直接推送到上游**
     - 检查你的账户下是否存在源仓库的 fork
     - 若无 fork 你必须自动 fork 仓库（使用 `gh repo fork --clone`）
     - 若有 fork 使用 Bash 克隆仓库
-    - 创建新分支（`git checkout -b <branch>`）（若你在现有 PR 中工作，请直接使用现有分支）
+    - **配置上游仓库地址**（`git remote add upstream <upstream-url>` 或确保已存在）
+    - **获取上游最新代码**（`git fetch upstream`）
+    - **创建新分支时，始终从上游最新分支创建**（`git checkout -b <branch> upstream/main` 或根据上下文选择正确分支），**而非可能陈旧的 fork 分支**
     - 使用 Edit 工具修改文件
     - 使用 Bash 运行测试、lint 或构建
     - 使用 Bash 提交 commit（`git add` / `git commit`）
-    - 使用 Bash 推送分支（`git push`）
+    - 使用 Bash 推送分支到 **你的 fork**（`git push origin <branch>`）
     - 使用 gh CLI 创建 Pull Request
+    - **如果任务来自 issue，在创建 PR 时必须在描述中添加 `Fixes #<issue-number>` 或 `Closes #<issue-number>` 标记以自动关闭 issue**
 2. 如果任务涉及 PR 审查，你可以：
     - 使用 `gh pr view` / `gh pr diff` 获取内容
     - 使用 `gh pr review --approve` / `--comment` / `--request-changes`
