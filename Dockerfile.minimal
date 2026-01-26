@@ -41,11 +41,8 @@ RUN apk add --no-cache \
     libgcc \
     && rm -rf /var/cache/apk/*
 
-# 设置 PATH
-ENV PATH="/app/.venv/bin:$PATH"
-
 # 切换到非 root 用户
 USER app
 
 # 启动应用
-CMD ["python", "server.py"]
+CMD ["fastapi", "run", "server.py", "--host", "0.0.0.0", "--port", "8000"]

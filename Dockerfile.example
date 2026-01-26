@@ -16,9 +16,9 @@ ENV UV_PYTHON=/usr/local/bin/python3.12
 # 复制依赖文件
 COPY pyproject.toml uv.lock ./
 
-# 安装依赖（利用缓存层）
+# 安装依赖（利用缓存层）- 先安装依赖，不安装项目本身
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable
+    uv sync --frozen --no-dev --no-editable --no-install-project
 
 # 复制源代码
 COPY . .

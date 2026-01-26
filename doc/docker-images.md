@@ -42,7 +42,7 @@ WORKDIR /app
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 USER app
-CMD ["fastapi", "run", "server.py", "--host", "0.0.0.0"]
+CMD ["fastapi", "run", "server.py", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 ---
@@ -87,7 +87,7 @@ COPY --from=builder --chown=nonroot:nonroot /python /python
 COPY --from=builder --chown=nonroot:nonroot /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:/python/bin:$PATH"
 USER nonroot
-CMD ["fastapi", "run", "server.py", "--host", "0.0.0.0"]
+CMD ["fastapi", "run", "server.py", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 ---
@@ -131,7 +131,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      test: ["CMD-SHELL", "python -c \"import httpx; httpx.get('http://localhost:8000/health', timeout=2)\" || exit 1"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -154,6 +154,11 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import httpx; httpx.get('http://localhost:8000/health', timeout=2)\" || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
 ```
 
 ---
