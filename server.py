@@ -13,6 +13,20 @@ GQL_TOKEN = os.getenv("GQL_TOKEN")      # 你的 PAT：拥有完整权限，用�
 CONTROL_REPO = os.getenv("CONTROL_REPO")
 ALLOWED_USERS = [u.strip() for u in os.getenv("ALLOWED_USERS", "").split(",") if u.strip()]
 BOT_HANDLE = "@WhiteElephantIsNotARobot"
+LOG_FILE = os.getenv("PROCESSED_LOG", "/data/processed_notifications.log")
+
+# 启动时加载历史记录
+if os.path.exists(LOG_FILE):
+    with open(LOG_FILE, "r") as f:
+        processed_cache = set(f.read().splitlines())
+else:
+    processed_cache = set()
+
+# 在 trigger_workflow 成功后写入
+async def save_to_log(key: str):
+    processed_cache.add(key)
+    with open(LOG_FILE, "a") as f:
+        f.write(f"{key}\n")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("GQLBot")
