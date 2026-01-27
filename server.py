@@ -65,7 +65,7 @@ query($url: URI!) {
     }
     ... on Issue {
       title body number
-      baseRepository { nameWithOwner }
+      repository { nameWithOwner }
       timelineItems(last: 30, itemTypes: [ISSUE_COMMENT]) {
         nodes { ... on IssueComment { id author { login } body createdAt } }
       }
@@ -94,28 +94,48 @@ query($url: URI!) {
 async def handle_notification(client: httpx.AsyncClient, note: Dict):
     thread_id = note["id"]
     # 原始 URL 是 REST 格式: https://api.github.com/repos/owner/repo/issues/19
-    raw_url = note["subject"]["url"]
+    raw_url = note["subject"].get("url")
+    
+    logger.info(f"Raw URL from notification: {raw_url}")
+    
+    # Check if URL is None or empty
+    if not raw_url:
+        logger.warning(f"Empty URL in notification: {note}")
+        return
 
     # 【核心修复】转换为 GraphQL 认可的 HTML 格式
     # 1. 把 api.github.com/repos 换成 github.com
     # 2. 把 /pulls/ 换成 /pull/ (Web 端 PR 的路径是单数)
     subject_url = raw_url.replace("api.github.com/repos/", "github.com/")
     subject_url = subject_url.replace("/pulls/", "/pull/")
+    
+    # Remove trailing slash if present
+    subject_url = subject_url.rstrip('/')
 
     logger.info(f"Processing: {note['subject']['title']} -> GQL URL: {subject_url}")
+        
+    # Debug token info (mask token for security)
+    token_preview = GQL_TOKEN[:8] + "..." + GQL_TOKEN[-4:] if GQL_TOKEN else "None"
+    logger.info(f"Using GQL_TOKEN: {token_preview}")
 
     gql_headers = {"Authorization": f"Bearer {GQL_TOKEN}"}
     try:
         # 发送转换后的 subject_url
+        logger.debug(f"GraphQL query: {GQL_UNIVERSAL_QUERY}")
+        logger.debug(f"GraphQL variables: {{'url': {subject_url}}}")
         resp = await client.post(GITHUB_API, json={"query": GQL_UNIVERSAL_QUERY, "variables": {"url": subject_url}}, headers=gql_headers)
         if resp.status_code != 200:
-            logger.error(f"GQL HTTP Error {resp.status_code}")
+            logger.error(f"GQL HTTP Error {resp.status_code}, body: {resp.text}")
             return
 
-        data = resp.json().get("data", {}).get("resource")
+        json_resp = resp.json()
+        data = json_resp.get("data", {}).get("resource")
         if not data:
             # 如果还报错，这里会打印出转换后的 URL，方便排查
+            errors = json_resp.get("errors", [])
             logger.warning(f"No resource found for URL: {subject_url}")
+            logger.warning(f"GraphQL errors: {errors}")
+            logger.warning(f"Full response: {json_resp}")
             return
     except Exception as e:
         logger.error(f"Exception during GQL call: {e}")
@@ -215,4 +235,23 @@ async def poll_loop():
 
 @app.on_event("startup")
 async def startup():
+    # 配置验证
+    if not GQL_TOKEN:
+        logger.error("GQL_TOKEN environment variable is not set!")
+        logger.error("Please set GQL_TOKEN with a GitHub Personal Access Token that has 'repo' scope.")
+    else:
+        token_preview = GQL_TOKEN[:8] + "..." + GQL_TOKEN[-4:]
+        logger.info(f"GQL_TOKEN is set: {token_preview}")
+    
+    if not BOT_TOKEN:
+        logger.warning("BOT_TOKEN environment variable is not set!")
+    
+    if not CONTROL_REPO:
+        logger.warning("CONTROL_REPO environment variable is not set!")
+    else:
+        logger.info(f"CONTROL_REPO: {CONTROL_REPO}")
+    
+    logger.info(f"ALLOWED_USERS: {ALLOWED_USERS}")
+    logger.info(f"LOG_FILE: {LOG_FILE}")
+    
     asyncio.create_task(poll_loop())
