@@ -1,0 +1,56 @@
+# ============================================
+# 方案 2: 基于 Google Distroless (最小攻击面)
+# ============================================
+FROM ghcr.io/astral-sh/uv:bookworm-slim AS builder
+
+# 配置 uv 环境变量
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+# 配置 Python 安装目录
+ENV UV_PYTHON_INSTALL_DIR=/python
+ENV UV_PYTHON_PREFERENCE=only-managed
+
+WORKDIR /app
+
+# 先安装 Python（用于缓存）
+RUN uv python install 3.12
+
+# 复制依赖文件
+COPY pyproject.toml uv.lock ./
+
+# 安装依赖（利用缓存层）
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-install-project --no-dev --no-editable
+
+# 复制源代码
+COPY . .
+
+# 安装项目
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable
+
+# ============================================
+# 运行时镜像 - Distroless (基于 gcr.io/distroless/cc)
+# ============================================
+FROM gcr.io/distroless/cc AS runtime
+
+WORKDIR /app
+
+# 从构建阶段复制 Python 和虚拟环境
+COPY --from=builder --chown=nonroot:nonroot /python /python
+COPY --from=builder --chown=nonroot:nonroot /app/.venv /app/.venv
+
+# 设置 PATH 以使用虚拟环境中的可执行文件
+ENV PATH="/app/.venv/bin:/python/bin:$PATH"
+
+# 使用 distroless 的非 root 用户
+USER nonroot
+
+# 健康检查 (使用 JSON 格式，不依赖 shell)
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["python", "-c", "import httpx; httpx.get('http://localhost:8000/health', timeout=2)"]
+
+# 启动应用 (使用 uvicorn 代替 fastapi run，更适合生产环境)
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]

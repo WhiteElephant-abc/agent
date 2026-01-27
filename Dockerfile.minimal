@@ -1,0 +1,48 @@
+# ============================================
+# 方案 3: 基于 Alpine (最小体积，但不推荐)
+# ============================================
+FROM python:3.12-alpine AS builder
+
+# Alpine 需要额外的系统包来构建某些 Python 依赖
+RUN apk add --no-cache \
+    build-base \
+    linux-headers \
+    && rm -rf /var/cache/apk/*
+
+WORKDIR /app
+
+# 安装 pip
+RUN pip install --upgrade pip
+
+# 复制依赖文件
+COPY requirements.txt .
+
+# 安装依赖
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 复制源代码
+COPY . .
+
+# ============================================
+# 运行时镜像
+# ============================================
+FROM python:3.12-alpine AS runtime
+
+# 创建非 root 用户
+RUN addgroup -S app && adduser -S app -G app
+
+WORKDIR /app
+
+# 从构建阶段复制依赖和代码
+COPY --from=builder --chown=app:app /app /app
+
+# 安装运行时依赖（Alpine 需要 libgcc 等运行时库）
+RUN apk add --no-cache \
+    libgcc \
+    && rm -rf /var/cache/apk/*
+
+# 切换到非 root 用户
+USER app
+
+# 启动应用 (使用 uvicorn 代替 fastapi run，更适合生产环境)
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
