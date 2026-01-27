@@ -725,8 +725,11 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
         # 如果issue body中有@机器人，也添加到时间线中
         issue_body = resource_data.get("body", "")
         if issue_body and BOT_HANDLE.lower() in issue_body.lower():
+            # 获取仓库名称用于唯一ID生成
+            repo_name = resource_data.get("repository", {}).get("nameWithOwner", "").replace("/", "_")
+            issue_number = resource_data.get('number', '')
             timeline_items.append(TimelineItem(
-                id=f"issue_body_{resource_data.get('number', '')}",
+                id=f"issue_body_{repo_name}_{issue_number}" if repo_name else f"issue_body_{issue_number}",
                 body=issue_body,
                 created_at=resource_data.get("createdAt", "1970-01-01T00:00:00Z"),
                 user=(resource_data.get("author") or {}).get("login", "unknown"),
@@ -760,8 +763,11 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
         # 如果discussion body中有@机器人，也添加到时间线中
         discussion_body = resource_data.get("body", "")
         if discussion_body and BOT_HANDLE.lower() in discussion_body.lower():
+            # 获取仓库名称用于唯一ID生成
+            repo_name = resource_data.get("repository", {}).get("nameWithOwner", "").replace("/", "_")
+            discussion_number = resource_data.get('number', '')
             timeline_items.append(TimelineItem(
-                id=f"discussion_body_{resource_data.get('number', '')}",
+                id=f"discussion_body_{repo_name}_{discussion_number}" if repo_name else f"discussion_body_{discussion_number}",
                 body=discussion_body,
                 created_at=resource_data.get("createdAt", "1970-01-01T00:00:00Z"),
                 user=(resource_data.get("author") or {}).get("login", "unknown"),
@@ -794,8 +800,11 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
     if not trigger_node and resource_data["__typename"] == "Issue":
         issue_body = resource_data.get("body", "")
         if issue_body and BOT_HANDLE.lower() in issue_body.lower():
+            # 获取仓库名称用于唯一ID生成
+            repo_name = resource_data.get("repository", {}).get("nameWithOwner", "").replace("/", "_")
+            issue_number = resource_data.get('number', '')
             trigger_node = TimelineItem(
-                id=f"issue_body_{resource_data.get('number', '')}",
+                id=f"issue_body_{repo_name}_{issue_number}" if repo_name else f"issue_body_{issue_number}",
                 body=issue_body,
                 created_at=resource_data.get("createdAt", "1970-01-01T00:00:00Z"),
                 user=(resource_data.get("author") or {}).get("login", "unknown"),
@@ -807,8 +816,11 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
     if not trigger_node and resource_data["__typename"] == "Discussion":
         discussion_body = resource_data.get("body", "")
         if discussion_body and BOT_HANDLE.lower() in discussion_body.lower():
+            # 获取仓库名称用于唯一ID生成
+            repo_name = resource_data.get("repository", {}).get("nameWithOwner", "").replace("/", "_")
+            discussion_number = resource_data.get('number', '')
             trigger_node = TimelineItem(
-                id=f"discussion_body_{resource_data.get('number', '')}",
+                id=f"discussion_body_{repo_name}_{discussion_number}" if repo_name else f"discussion_body_{discussion_number}",
                 body=discussion_body,
                 created_at=resource_data.get("createdAt", "1970-01-01T00:00:00Z"),
                 user=(resource_data.get("author") or {}).get("login", "unknown"),
