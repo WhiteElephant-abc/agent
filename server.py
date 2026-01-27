@@ -7,8 +7,8 @@ import httpx
 GITHUB_API = "https://api.github.com/graphql"
 REST_API = "https://api.github.com"
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")      
-GQL_TOKEN = os.getenv("GQL_TOKEN")      
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GQL_TOKEN = os.getenv("GQL_TOKEN")
 CONTROL_REPO = os.getenv("CONTROL_REPO")
 ALLOWED_USERS = [u.strip() for u in os.getenv("ALLOWED_USERS", "").split(",") if u.strip()]
 BOT_HANDLE = "@WhiteElephantIsNotARobot"
@@ -55,10 +55,10 @@ query($url: URI!) {
           __typename
           ... on IssueComment { id author { login } body createdAt }
           ... on PullRequestReview { id author { login } body createdAt }
-          ... on PullRequestReviewComment { 
-            id author { login } body createdAt 
-            pullRequestReview { id } 
-            path diffHunk 
+          ... on PullRequestReviewComment {
+            id author { login } body createdAt
+            pullRequestReview { id }
+            path diffHunk
           }
         }
       }
@@ -81,7 +81,7 @@ query($url: URI!) {
       title body number
       repository { nameWithOwner }
       comments(last: 30) {
-        nodes { 
+        nodes {
           id author { login } body createdAt
           replies(last: 10) { nodes { id author { login } body createdAt } }
         }
@@ -93,18 +93,28 @@ query($url: URI!) {
 
 async def handle_notification(client: httpx.AsyncClient, note: Dict):
     thread_id = note["id"]
-    subject_url = note["subject"]["url"]
-    logger.info(f"Processing notification: {note['subject']['title']} ({subject_url})")
+    # 原始 URL 是 REST 格式: https://api.github.com/repos/owner/repo/issues/19
+    raw_url = note["subject"]["url"]
+
+    # 【核心修复】转换为 GraphQL 认可的 HTML 格式
+    # 1. 把 api.github.com/repos 换成 github.com
+    # 2. 把 /pulls/ 换成 /pull/ (Web 端 PR 的路径是单数)
+    subject_url = raw_url.replace("api.github.com/repos/", "github.com/")
+    subject_url = subject_url.replace("/pulls/", "/pull/")
+
+    logger.info(f"Processing: {note['subject']['title']} -> GQL URL: {subject_url}")
 
     gql_headers = {"Authorization": f"Bearer {GQL_TOKEN}"}
     try:
+        # 发送转换后的 subject_url
         resp = await client.post(GITHUB_API, json={"query": GQL_UNIVERSAL_QUERY, "variables": {"url": subject_url}}, headers=gql_headers)
         if resp.status_code != 200:
-            logger.error(f"GQL HTTP Error {resp.status_code}: {resp.text}")
+            logger.error(f"GQL HTTP Error {resp.status_code}")
             return
-        
+
         data = resp.json().get("data", {}).get("resource")
         if not data:
+            # 如果还报错，这里会打印出转换后的 URL，方便排查
             logger.warning(f"No resource found for URL: {subject_url}")
             return
     except Exception as e:
@@ -125,8 +135,8 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
 
     # 过滤掉空节点并匹配
     new_mentions = [
-        n for n in nodes 
-        if n and n.get("body") and BOT_HANDLE.lower() in n["body"].lower() 
+        n for n in nodes
+        if n and n.get("body") and BOT_HANDLE.lower() in n["body"].lower()
         and n.get("id") not in processed_cache
     ]
 
@@ -173,7 +183,7 @@ async def trigger_workflow(client: httpx.AsyncClient, ctx: Dict, thread_id: str)
             "context": json.dumps(ctx, ensure_ascii=False)
         }
     }
-    
+
     r = await client.post(url, headers=headers, json=payload)
     if r.status_code == 204:
         logger.info(f"Successfully triggered Action for Node {ctx['node_id']}")
@@ -189,7 +199,7 @@ async def poll_loop():
         logger.info("Poll loop started...")
         while True:
             try:
-                r = await client.get(f"{REST_API}/notifications", params={"participating": "true"}, 
+                r = await client.get(f"{REST_API}/notifications", params={"participating": "true"},
                                     headers={"Authorization": f"token {BOT_TOKEN}"})
                 if r.status_code == 200:
                     notes = r.json()
