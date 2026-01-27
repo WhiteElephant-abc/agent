@@ -1,3 +1,4 @@
+server.py
 import os, json, logging, asyncio, re
 from typing import Dict, List, Optional, Any, Tuple
 from fastapi import FastAPI
@@ -39,7 +40,7 @@ else:
 
 app = FastAPI()
 
-# --- 数据模型 (融合早期版本的丰富元数据) ---
+# --- 数据模型 (基于test_context.py修复) ---
 class TimelineItem(BaseModel):
     """时间线项目，统一表示评论、审核、审核评论等"""
     id: str
@@ -54,7 +55,7 @@ class TimelineItem(BaseModel):
     review_id: Optional[str] = None  # 对于review_comment
 
 class TaskContext(BaseModel):
-    """丰富的上下文数据模型"""
+    """丰富的上下文数据模型（基于test_context.py修复）"""
     # 基础信息
     repo: str
     event_type: str
@@ -81,6 +82,8 @@ class TaskContext(BaseModel):
     clone_url: Optional[str] = None
     head_ref: Optional[str] = None
     base_ref: Optional[str] = None
+    head_repo: Optional[str] = None      # 基于test_context.py添加
+    base_repo: Optional[str] = None      # 基于test_context.py添加
     commit_sha: Optional[str] = None
 
     # 元数据
@@ -111,7 +114,7 @@ class TaskContext(BaseModel):
         # 注意：去掉indent参数以减少JSON大小（GitHub Actions有64KB限制）
         return json.dumps(cleaned_data, ensure_ascii=False)
 
-# --- 智能节选算法 (恢复早期版本的3:1算法) ---
+# --- 智能节选算法 (基于test_context.py，与server.py一致) ---
 def truncate_context_by_chars(items: List[TimelineItem], max_chars: int) -> Tuple[List[TimelineItem], bool]:
     """
     3新1老比例抓取 + 超限撤销 + 单边终止算法
@@ -424,7 +427,7 @@ def build_rich_context(
     note_id: str
 ) -> TaskContext:
     """
-    构建丰富的上下文数据
+    构建丰富的上下文数据（基于test_context.py修复）
     """
     resource_type = resource_data.get("__typename")
     repo_full = ""
@@ -480,7 +483,7 @@ def build_rich_context(
         context.base_ref = resource_data.get("baseRefName")
         context.diff_url = raw_url.replace("/issues/", "/pulls/") + ".diff"
         
-        # 获取PR分支仓库信息
+        # 获取PR分支仓库信息（基于test_context.py修复）
         head_repo = resource_data.get("headRepository", {})
         repo_path = None
 
@@ -500,11 +503,19 @@ def build_rich_context(
         if repo_path:
             clone_url = f"git@github.com:{repo_path}.git"
             context.clone_url = clone_url
-            # 设置 head_repo 为 repo:branch 格式
+            # 设置 head_repo 为 repo:branch 格式（基于test_context.py修复）
             if context.head_ref:
                 context.head_repo = f"{repo_path}:{context.head_ref}"
             logger.info(f"PR branch clone_url (SSH): {clone_url}")
             logger.info(f"PR head_repo (repo:branch): {context.head_repo}")
+
+        # 获取基础仓库信息（基于test_context.py添加）
+        base_repo = resource_data.get("baseRepository", {})
+        if base_repo and base_repo.get("nameWithOwner"):
+            base_repo_name = base_repo.get("nameWithOwner")
+            if context.base_ref:
+                context.base_repo = f"{base_repo_name}:{context.base_ref}"
+                logger.info(f"PR base_repo (repo:branch): {context.base_repo}")
 
         # 检查是否在PR正文中被提及
         if context.pr_body:
@@ -535,7 +546,7 @@ def build_rich_context(
         logger.info(f"Trigger message: '{trigger_node.body[:100]}{'...' if len(trigger_node.body) > 100 else ''}'")
         logger.info(f"Trigger node type: {trigger_node.type}")
 
-    # 分离评论历史
+    # 分离评论历史（基于test_context.py修复review触发过滤逻辑）
     if timeline_items:
         logger.info(f"Applying smart truncation to {len(timeline_items)} timeline items (max: {CONTEXT_MAX_CHARS} chars)")
         # 智能截断
@@ -552,21 +563,24 @@ def build_rich_context(
             # 根据触发类型决定包含哪些历史
             trigger_type = trigger_node.type if trigger_node else None
             
-            # 如果是review或review_comment触发，只保留review相关内容
+            # 如果是review或review_comment触发，采用test_context.py的更精确过滤逻辑
             if trigger_type in ["review", "review_comment"]:
+                # 基于test_context.py修复：只保留与当前review相关的项目
+                trigger_review_id = trigger_node.review_id if trigger_node.review_id else trigger_node.id
+                
                 if item.type == "review":
-                    reviews_history.append({
-                        "id": item.id,
-                        "user": item.user,
-                        "body": item.body,
-                        "state": item.state,
-                        "submitted_at": item.created_at
-                    })
+                    # 只包含当前触发的review（test_context.py的精确过滤）
+                    if item.id == trigger_review_id:
+                        reviews_history.append({
+                            "id": item.id,
+                            "user": item.user,
+                            "body": item.body,
+                            "state": item.state,
+                            "submitted_at": item.created_at
+                        })
+                        logger.info(f"Including review {item.id} for review {trigger_review_id}")
                 elif item.type == "review_comment" and item.review_id:
                     # 只保留与当前review相关的评论
-                    # 如果trigger_node是review本身，其id就是review_id
-                    # 如果trigger_node是review_comment，其review_id字段就是所属review
-                    trigger_review_id = trigger_node.review_id if trigger_node.review_id else trigger_node.id
                     if item.review_id == trigger_review_id:
                         review_comments_batch.append({
                             "id": item.id,
@@ -576,7 +590,7 @@ def build_rich_context(
                             "diff_hunk": item.diff_hunk
                         })
                         logger.info(f"Including review comment {item.id} for review {trigger_review_id}")
-                # 对于review触发，不保留普通comment
+                # 对于review触发，不保留普通comment（基于test_context.py逻辑）
             else:
                 # 普通触发（comment）：只处理comment和review，不处理review_comment
                 if item.type == "comment":
@@ -703,9 +717,9 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
             )
             logger.info(f"Found trigger node in issue body: {trigger_node.id} by @{trigger_node.user} (type: {trigger_node.type})")
 
-    # 4. 权限检查
+    # 4. 权限检查和触发节点验证
     if not trigger_node:
-        logger.info(f"No trigger node found for notification {thread_id}")
+        logger.error(f"No trigger node found for notification {thread_id}. Workflow triggered by @ mention, but no @ message found.")
         # 如果没有找到触发节点，尝试标记为已读
         try:
             await client.patch(
@@ -714,6 +728,11 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
             )
         except:
             pass
+        return
+
+    # 验证触发消息是否存在
+    if not trigger_node.body or not trigger_node.body.strip():
+        logger.error(f"Trigger node {trigger_node.id} has empty body. Cannot proceed with workflow.")
         return
 
     if ALLOWED_USERS and trigger_node.user not in ALLOWED_USERS:
@@ -728,7 +747,7 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
             pass
         return
 
-    # 5. 构建完整上下文
+    # 5. 构建完整上下文（使用修复后的build_rich_context）
     context = build_rich_context(resource_data, timeline_items, trigger_node, raw_url, thread_id)
 
     # 6. 获取diff内容（根据触发类型决定）
@@ -759,65 +778,13 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
             pass
         return
 
-    # 8. 生成任务描述（恢复早期版本的智能描述生成）
-    task_description = generate_task_description(resource_data["__typename"], context, trigger_node)
+    # 8. 使用触发消息直接作为任务描述
+    # 整个工作流由@触发，必定存在一个包含@的消息可以放入task
+    task_description = trigger_node.body
+    logger.info(f"Using trigger message directly as task description: '{task_description[:200]}{'...' if len(task_description) > 200 else ''}'")
 
     # 9. 触发工作流
     await trigger_workflow(client, context, task_description, trigger_node.id, thread_id)
-
-def generate_task_description(event_type: str, context: TaskContext, trigger_node: TimelineItem) -> str:
-    """
-    生成LLM任务描述：始终保留原始触发消息（包括@机器人）
-    策略：
-    1. 如果触发消息包含实际内容（不只是@机器人），直接使用原始消息
-    2. 如果只是@机器人（空提及），生成智能默认描述
-    """
-    trigger_message = trigger_node.body
-    
-    # 检查是否是"空提及"（只有@机器人或只有标点）
-    is_empty_mention = False
-    if trigger_message:
-        # 移除机器人提及和空白字符，检查剩余内容
-        pattern = re.compile(re.escape(BOT_HANDLE), re.IGNORECASE)
-        cleaned = pattern.sub("", trigger_message).strip()
-        
-        # 如果清理后完全为空，视为空提及
-        if not cleaned:
-            # 无论在哪里，只要包含@就是有效内容
-            is_empty_mention = False
-        else:
-            # 检查是否只包含标点符号或极短的无效内容
-            # 常见标点符号（中英文）
-            punctuation_pattern = r'^[\s\.,!?。，！？;:;：\-—~～、]*$'
-            if re.match(punctuation_pattern, cleaned):
-                is_empty_mention = True
-            # 检查是否只有非常短且无意义的词（如"OK"、"好的"等）
-            elif len(cleaned) <= 4:
-                # 如果是非常短的常见响应词，不视为空提及
-                short_valid_responses = ["ok", "好的", "行", "yes", "no", "好", "okay", "收到", "roger", "copy"]
-                if cleaned.lower() not in short_valid_responses and cleaned not in short_valid_responses:
-                    # 检查是否全是字母或数字（可能是有意义的简短回答）
-                    if not re.match(r'^[a-zA-Z0-9]+$', cleaned):
-                        is_empty_mention = True
-    
-    # 情况1：空提及或没有实际内容 -> 生成智能默认描述
-    if is_empty_mention or not trigger_message:
-        if event_type == "PullRequest":
-            # 对于PR，查看是否有代码变更需要审查
-            if context.diff_content and len(context.diff_content) > 100:
-                return f"Please review the code changes in PR #{context.issue_number}: {context.pr_title or 'No title'}"
-            else:
-                return f"Please review PR #{context.issue_number}: {context.pr_title or 'No title'}"
-        elif event_type == "Issue":
-            return f"Please analyze issue #{context.issue_number}: {context.title or 'No title'}"
-        elif event_type == "Commit":
-            return f"Please review commit {context.commit_sha[:8] if context.commit_sha else 'unknown'}: {context.title or 'No message'}"
-        else:
-            return f"Please process this {event_type}"
-    
-    # 情况2：有实际内容的触发消息 -> 直接返回原始消息（包含@机器人）
-    # 重要：保留原始@指令，让LLM知道这是直接针对它的请求
-    return trigger_message
 
 async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_text: str, node_id: str, thread_id: str) -> bool:
     """
@@ -845,6 +812,7 @@ async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_tex
     logger.info(f"diff_content present: {bool(ctx.diff_content)}")
     logger.info(f"clone_url: {ctx.clone_url}")
     logger.info(f"head_ref: {ctx.head_ref}, base_ref: {ctx.base_ref}")
+    logger.info(f"head_repo: {ctx.head_repo}, base_repo: {ctx.base_repo}")
     
     # 记录任务描述
     logger.info(f"LLM_TASK to send: '{task_text[:200]}{'...' if len(task_text) > 200 else ''}'")
@@ -988,7 +956,7 @@ async def health_check():
         "service": "enhanced-llm-bot-server",
         "processed_cache_size": len(processed_cache),
         "context_max_chars": CONTEXT_MAX_CHARS,
-        "features": ["smart_truncation_3_1", "rich_context", "graphql_enhanced", "dual_token"]
+        "features": ["smart_truncation_3_1", "rich_context", "graphql_enhanced", "dual_token", "test_context_fix", "direct_trigger_task"]
     }
 
 @app.get("/stats")
