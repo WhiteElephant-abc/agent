@@ -47,14 +47,14 @@ jobs:
         working-directory: /home/runner/work
     steps:
 
-      - name: 安装Claude CLI
+      - name: Install Claude CLI
         run: |
           curl -fsSL https://claude.ai/install.sh | bash
 
-      - name: 安装uv包管理器
+      - name: Install uv package manager
         uses: astral-sh/setup-uv@v7
 
-      - name: 验证令牌和环境变量
+      - name: Validate tokens and environment variables
         run: |
           echo "验证环境变量..."
           # 验证GitHub令牌
@@ -79,7 +79,7 @@ jobs:
             echo "系统提示词已设置"
           fi
 
-      - name: 添加MCP服务器
+      - name: Add MCP servers
         run: |
           # 添加DuckDuckGo搜索服务器
           echo "添加DuckDuckGo搜索服务器..."
@@ -96,7 +96,7 @@ jobs:
         env:
           CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
 
-      - name: 预配置Git（用户、SSH、GPG签名）
+      - name: Pre-configure Git (user, SSH, GPG signing)
         run: |
           echo "配置Git用户信息..."
           git config --global user.name "WhiteElephantIsNotARobot"
@@ -151,7 +151,7 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
 
-      - name: 以GitHub机器人身份运行Claude Code
+      - name: Run Claude Code as GitHub bot
         run: |
           echo "运行Claude Code..."
           echo "原始任务: $LLM_TASK"
