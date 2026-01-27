@@ -50,15 +50,14 @@ query($url: URI!) {
     ... on PullRequest {
       title body number
       baseRepository { nameWithOwner }
-      timelineItems(last: 50, itemTypes: [ISSUE_COMMENT, PULL_REQUEST_REVIEW, PULL_REQUEST_REVIEW_COMMENT]) {
-        nodes {
-          __typename
-          ... on IssueComment { id author { login } body createdAt }
-          ... on PullRequestReview { id author { login } body createdAt }
-          ... on PullRequestReviewComment {
-            id author { login } body createdAt
-            pullRequestReview { id }
-            path diffHunk
+      comments(last: 50) {
+        nodes { id author { login } body createdAt }
+      }
+      reviews(last: 50) {
+        nodes { 
+          id author { login } body createdAt 
+          comments(last: 50) {
+            nodes { id author { login } body path diffHunk createdAt }
           }
         }
       }
@@ -66,25 +65,15 @@ query($url: URI!) {
     ... on Issue {
       title body number
       repository { nameWithOwner }
-      timelineItems(last: 30, itemTypes: [ISSUE_COMMENT]) {
-        nodes { ... on IssueComment { id author { login } body createdAt } }
+      comments(last: 50) {
+        nodes { id author { login } body createdAt }
       }
     }
     ... on Commit {
       message oid
       repository { nameWithOwner }
       comments(last: 30) {
-        nodes { id author { login } body path diffHunk createdAt }
-      }
-    }
-    ... on Discussion {
-      title body number
-      repository { nameWithOwner }
-      comments(last: 30) {
-        nodes {
-          id author { login } body createdAt
-          replies(last: 10) { nodes { id author { login } body createdAt } }
-        }
+        nodes { id author { login } body path createdAt }
       }
     }
   }
@@ -141,17 +130,30 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
         logger.error(f"Exception during GQL call: {e}")
         return
 
+    # 根据资源类型收集所有评论节点
     nodes = []
-    if "timelineItems" in data:
-        nodes = data["timelineItems"]["nodes"]
-    elif "comments" in data:
+    if data["__typename"] == "PullRequest":
+        # 收集 PR 评论
+        if data.get("comments") and data["comments"].get("nodes"):
+            nodes.extend(data["comments"]["nodes"])
+        
+        # 收集审核（reviews）和审核评论（review comments）
+        if data.get("reviews") and data["reviews"].get("nodes"):
+            for review in data["reviews"]["nodes"]:
+                # 添加审核对象本身作为节点（如果包含评论内容）
+                if review and review.get("body"):
+                    review_copy = review.copy()
+                    review_copy["__typename"] = "PullRequestReview"
+                    review_copy["author"] = review.get("author", {})
+                    nodes.append(review_copy)
+                
+                # 收集审核的评论
+                if review.get("comments") and review["comments"].get("nodes"):
+                    nodes.extend(review["comments"]["nodes"])
+    
+    elif data.get("comments") and data["comments"].get("nodes"):
+        # 处理 Issue 和 Commit
         nodes = data["comments"]["nodes"]
-        if data["__typename"] == "Discussion":
-            expanded = []
-            for c in nodes:
-                expanded.append(c)
-                if c.get("replies"): expanded.extend(c["replies"]["nodes"])
-            nodes = expanded
 
     # 过滤掉空节点并匹配
     new_mentions = [
