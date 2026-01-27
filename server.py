@@ -1,4 +1,4 @@
-import os, json, logging, asyncio
+import os, json, logging, asyncio, re
 from typing import Dict, List, Optional, Any, Tuple
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -291,19 +291,8 @@ query($url: URI!, $commentsCount: Int = 50, $reviewsCount: Int = 30) {
         nodes { id author { login } body createdAt path }
       }
     }
-    ... on Discussion {
-      title body number
-      repository { nameWithOwner }
-      url
-      comments(last: $commentsCount) {
-        nodes {
-          id author { login } body createdAt
-          replies(last: 10) {
-            nodes { id author { login } body createdAt }
-          }
-        }
-      }
-    }
+    # Discussion 类型不支持在 resource(url:) 查询中，需要特殊处理
+    # 对于Discussion，我们将回退到REST API
   }
 }
 """
@@ -404,6 +393,17 @@ def build_rich_context(
         repo_full = resource_data.get("repository", {}).get("nameWithOwner", "")
     elif resource_type == "Discussion":
         repo_full = resource_data.get("repository", {}).get("nameWithOwner", "")
+    
+    # 如果无法从GraphQL获取repo信息，尝试从URL解析
+    if not repo_full and raw_url:
+        try:
+            # 从URL解析：https://api.github.com/repos/owner/repo/issues/123
+            import re
+            match = re.search(r'repos/([^/]+/[^/]+)', raw_url)
+            if match:
+                repo_full = match.group(1)
+        except:
+            pass
 
     # 基础信息
     context = TaskContext(
