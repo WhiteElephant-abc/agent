@@ -9,6 +9,9 @@ from datetime import datetime
 GITHUB_API = "https://api.github.com/graphql"
 REST_API = "https://api.github.com"
 
+# 时间戳验证阈值（秒）
+EVENT_TIME_THRESHOLD_SECONDS = 60  # 触发节点创建时间比通知更新时间早超过此阈值时，视为旧事件
+
 # 双 Token 架构
 BOT_TOKEN = os.getenv("BOT_TOKEN")      # 机器人Token：仅用于读取通知和标记已读
 GQL_TOKEN = os.getenv("GQL_TOKEN")      # 个人PAT：用于GraphQL查询和触发Workflow
@@ -745,16 +748,12 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
             pass
         return
 
-    # 检查通知类型 - 只处理 issue 和 pull_request 类型
-    # GitHub 通知的 subject.type 可以是: "Issue", "PullRequest", "Commit", "Discussion" 等
-    # 但 issue 关闭等事件也会触发通知，我们需要检查 URL 中是否包含事件信息
+    # 检查通知类型 - 只处理 "Issue", "PullRequest", "Commit", "Discussion"
+    # GitHub 通知的 subject.type 可以是多种类型，我们只处理这几种核心类型。
+    # 其它事件（如 issue 关闭）也可能触发 mention 通知，需要后续通过时间戳进一步过滤。
     subject_type = note.get("subject", {}).get("type")
     logger.info(f"Notification subject type: {subject_type}")
 
-    # 检查 URL 中是否包含事件类型（如 /issues/123 可能是 issue 关闭事件）
-    # 我们需要确保只处理真正包含 @mention 的内容，而不是所有相关事件
-    # 例如：issue 被关闭时，如果之前被 @mention 过，也会触发通知
-    # 但这种通知不应该触发 workflow，因为没有新的 @mention
     if subject_type and subject_type not in ["Issue", "PullRequest", "Commit", "Discussion"]:
         logger.info(f"Ignoring notification with unsupported subject type: {subject_type}")
         try:
@@ -762,8 +761,8 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
                 f"{REST_API}/notifications/threads/{thread_id}",
                 headers={"Authorization": f"token {BOT_TOKEN}"}
             )
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to mark notification {thread_id} as read: {e}")
         return
 
     # 1. 获取资源详情
@@ -913,10 +912,10 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
             note_time = datetime.fromisoformat(notification_updated_at.replace("Z", "+00:00"))
             trigger_time = datetime.fromisoformat(trigger_node.created_at.replace("Z", "+00:00"))
 
-            # 如果触发节点的创建时间比通知更新时间早很多（超过 1 分钟）
+            # 如果触发节点的创建时间比通知更新时间早很多（超过阈值）
             # 说明这不是新的 @mention，而是旧事件的后续通知（如 issue 关闭）
             time_diff = (note_time - trigger_time).total_seconds()
-            if time_diff > 60:  # 超过 1 分钟
+            if time_diff > EVENT_TIME_THRESHOLD_SECONDS:
                 logger.warning(f"Trigger node is too old (created {time_diff:.0f}s before notification update). This might be an event notification (e.g., issue closed) rather than a new @mention.")
                 logger.warning(f"Notification updated_at: {notification_updated_at}, Trigger created_at: {trigger_node.created_at}")
                 # 标记为已读但不触发 workflow
@@ -925,8 +924,8 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
                         f"{REST_API}/notifications/threads/{thread_id}",
                         headers={"Authorization": f"token {BOT_TOKEN}"}
                     )
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to mark notification {thread_id} as read: {e}")
                 return
             else:
                 logger.info(f"Trigger node time check passed (time diff: {time_diff:.0f}s)")
@@ -954,7 +953,7 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
     # 6. 构建完整上下文（使用修复后的build_rich_context）
     context = build_rich_context(resource_data, timeline_items, trigger_node, raw_url, thread_id)
 
-    # 6. 获取diff内容（根据触发类型决定）
+    # 7. 获取diff内容（根据触发类型决定）
     if resource_data["__typename"] in ["PullRequest", "Commit"]:
         # 如果是review或review_comment触发，不获取完整PR diff（使用review comments的diff_hunk）
         if trigger_node and trigger_node.type in ["review", "review_comment"]:
