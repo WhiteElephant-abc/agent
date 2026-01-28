@@ -180,7 +180,7 @@ jobs:
 
           # 自查
           claude \
-            -p "请快速自查是否在 GitHub 留下回复，如果否，请根据要求在 GitHub 中留下回复。另请快速检查工作区，确保所有更改都已经提交并推送，确保 PR 已存在，任何未推送的更改都将在此会话结束后被永久销毁！" \
+            -p "请快速自查是否在 GitHub 留下回复，如果否，请根据要求在 GitHub 中留下回复（但先检查是否已有回复，避免重复回复）。另请快速检查工作区，确保所有更改都已经提交并推送（若有），确保 PR 已存在（若fork中有commit），任何未推送的更改都将在此会话结束后被永久销毁！" \
             --system-prompt "$SYSTEM_PROMPT" \
             --allowedTools "Bash,TaskOutput,Edit,ExitPlanMode,Glob,Grep,KillShell,MCPSearch,NotebookEdit,Read,Skill,Task,TaskCreate,TaskGet,TaskList,TaskUpdate,WebFetch,WebSearch,Write,mcp__ddg-search__*,mcp__context7__*" \
             --output-format=stream-json \
@@ -192,7 +192,7 @@ jobs:
 
           # 再次自查
           claude \
-            -p "请再次确认：所有更改都已经提交并推送，并且 PR 已存在，任何未推送的更改都将在此会话结束后被永久销毁！" \
+            -p "请再次确认：所有更改都已经提交并推送（若有），并且 PR 已存在（若fork有commit），任何未推送的更改都将在此会话结束后被永久销毁！" \
             --system-prompt "$SYSTEM_PROMPT" \
             --allowedTools "Bash,TaskOutput,Edit,ExitPlanMode,Glob,Grep,KillShell,MCPSearch,NotebookEdit,Read,Skill,Task,TaskCreate,TaskGet,TaskList,TaskUpdate,WebFetch,WebSearch,Write,mcp__ddg-search__*,mcp__context7__*" \
             --output-format=stream-json \
