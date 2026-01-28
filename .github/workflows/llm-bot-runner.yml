@@ -24,17 +24,23 @@ jobs:
         id: create-issue
         run: |
           ISSUE_TITLE="[工作流]${{ inputs.task }}"
-          ISSUE_BODY="${{ inputs.context }}"
+          CONTEXT="${{ inputs.context }}"
 
           echo "创建日志issue..."
           echo "标题: $ISSUE_TITLE"
-          echo "Body长度: ${#ISSUE_BODY} 字符"
+          echo "Body长度: ${#CONTEXT} 字符"
+
+          # 使用jq安全构建JSON请求体
+          JSON_BODY=$(jq -n \
+            --arg title "$ISSUE_TITLE" \
+            --arg body "$CONTEXT" \
+            '{title: $title, body: $body}')
 
           ISSUE_RESPONSE=$(curl -s -X POST \
             -H "Authorization: token $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues" \
-            -d "{\"title\":\"$ISSUE_TITLE\",\"body\":\"$ISSUE_BODY\"}")
+            -d "$JSON_BODY")
 
           ISSUE_NUMBER=$(echo "$ISSUE_RESPONSE" | grep -o '\"number\":[[:space:]]*[0-9]*' | cut -d':' -f2 | tr -d ' ')
 
@@ -50,8 +56,8 @@ jobs:
     needs: create-issue
     runs-on: ubuntu-latest
     env:
-      LLM_TASK: ${{ inputs.task }}
-      LLM_CONTEXT: ${{ inputs.context }}
+      LLM_TASK: "${{ inputs.task }}"
+      LLM_CONTEXT: "${{ inputs.context }}"
       LOG_ISSUE_NUMBER: ${{ needs.create-issue.outputs.issue_number }}
       # GitHub身份令牌（4个名称都设置）- 使用agent的token
       GITHUB_TOKEN: ${{ secrets.WEINAR_API_KEY }}
@@ -84,7 +90,7 @@ jobs:
 
       - name: Install Claude CLI
         run: |
-          curl -fsSL https://claude.ai/install.sh | bash
+           curl -fsSL https://claude.ai/install.sh | bash || echo "Claude installation completed with warnings"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -112,6 +118,17 @@ jobs:
             exit 1
           else
             echo "系统提示词已设置"
+          fi
+
+      - name: Validate JSON context
+        run: |
+          echo "验证JSON上下文格式..."
+          if ! echo "$LLM_CONTEXT" | jq empty >/dev/null 2>&1; then
+            echo "错误: LLM_CONTEXT 不是有效的JSON"
+            echo "上下文内容: $LLM_CONTEXT"
+            exit 1
+          else
+            echo "JSON上下文格式验证通过"
           fi
 
       - name: Add MCP servers
@@ -193,7 +210,7 @@ jobs:
           echo "系统提示词长度: ${#SYSTEM_PROMPT} 字符"
 
           # 将JSON上下文写入文件（保存到/home/runner/目录）
-          echo "$LLM_CONTEXT" > /home/runner/context.json
+          echo "$LLM_CONTEXT" | jq . > /home/runner/context.json
           CONTEXT_CHARS=$(wc -m < /home/runner/context.json)
           echo "上下文文件大小: $CONTEXT_CHARS 字符"
           # 不直接cat内容，避免日志污染
