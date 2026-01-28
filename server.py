@@ -670,7 +670,7 @@ def build_rich_context(
                         logger.info(f"Including review comment {item.id} for review {trigger_review_id}")
                 # 对于review触发，不保留普通comment（基于test_context.py逻辑）
             else:
-                # 普通触发（comment）：只处理comment和review，不处理review_comment
+                # 普通触发（comment）：包含所有评论和最新批次的reviews
                 if item.type == "comment":
                     comments_history.append({
                         "id": item.id,
@@ -680,12 +680,22 @@ def build_rich_context(
                         "type": item.type
                     })
                 elif item.type == "review":
+                    # 包含所有经过智能截断的reviews（最新批次）
                     reviews_history.append({
                         "id": item.id,
                         "user": item.user,
                         "body": item.body,
                         "state": item.state,
                         "submitted_at": item.created_at
+                    })
+                elif item.type == "review_comment" and item.review_id:
+                    # 包含所有经过智能截断的review comments（最新批次）
+                    review_comments_batch.append({
+                        "id": item.id,
+                        "user": item.user,
+                        "body": item.body,
+                        "path": item.path,
+                        "diff_hunk": item.diff_hunk
                     })
 
         if comments_history:
