@@ -640,34 +640,26 @@ def build_rich_context(
         for item in truncated_items:
             # 根据触发类型决定包含哪些历史
             trigger_type = trigger_node.type if trigger_node else None
-            
-            # 如果是review或review_comment触发，采用test_context.py的更精确过滤逻辑
+
+            # 如果是review或review_comment触发，包含所有review和review_comment（按时间线截断）
             if trigger_type in ["review", "review_comment"]:
-                # 基于test_context.py修复：只保留与当前review相关的项目
-                trigger_review_id = trigger_node.review_id if trigger_node.review_id else trigger_node.id
-                
+                # 包含所有review（按时间线截断，而不是只包含当前review）
                 if item.type == "review":
-                    # 只包含当前触发的review（test_context.py的精确过滤）
-                    if item.id == trigger_review_id:
-                        reviews_history.append({
-                            "id": item.id,
-                            "user": item.user,
-                            "body": item.body,
-                            "state": item.state,
-                            "submitted_at": item.created_at
-                        })
-                        logger.info(f"Including review {item.id} for review {trigger_review_id}")
-                elif item.type == "review_comment" and item.review_id:
-                    # 只保留与当前review相关的评论
-                    if item.review_id == trigger_review_id:
-                        review_comments_batch.append({
-                            "id": item.id,
-                            "user": item.user,
-                            "body": item.body,
-                            "path": item.path,
-                            "diff_hunk": item.diff_hunk
-                        })
-                        logger.info(f"Including review comment {item.id} for review {trigger_review_id}")
+                    reviews_history.append({
+                        "id": item.id,
+                        "user": item.user,
+                        "body": item.body,
+                        "state": item.state,
+                        "submitted_at": item.created_at
+                    })
+                elif item.type == "review_comment":
+                    review_comments_batch.append({
+                        "id": item.id,
+                        "user": item.user,
+                        "body": item.body,
+                        "path": item.path,
+                        "diff_hunk": item.diff_hunk
+                    })
                 # 对于review触发，不保留普通comment（基于test_context.py逻辑）
             else:
                 # 普通触发（comment）：只处理comment和review，不处理review_comment
