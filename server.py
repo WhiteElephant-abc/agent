@@ -745,6 +745,27 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
             pass
         return
 
+    # 检查通知类型 - 只处理 issue 和 pull_request 类型
+    # GitHub 通知的 subject.type 可以是: "Issue", "PullRequest", "Commit", "Discussion" 等
+    # 但 issue 关闭等事件也会触发通知，我们需要检查 URL 中是否包含事件信息
+    subject_type = note.get("subject", {}).get("type")
+    logger.info(f"Notification subject type: {subject_type}")
+
+    # 检查 URL 中是否包含事件类型（如 /issues/123 可能是 issue 关闭事件）
+    # 我们需要确保只处理真正包含 @mention 的内容，而不是所有相关事件
+    # 例如：issue 被关闭时，如果之前被 @mention 过，也会触发通知
+    # 但这种通知不应该触发 workflow，因为没有新的 @mention
+    if subject_type and subject_type not in ["Issue", "PullRequest", "Commit", "Discussion"]:
+        logger.info(f"Ignoring notification with unsupported subject type: {subject_type}")
+        try:
+            await client.patch(
+                f"{REST_API}/notifications/threads/{thread_id}",
+                headers={"Authorization": f"token {BOT_TOKEN}"}
+            )
+        except:
+            pass
+        return
+
     # 1. 获取资源详情
     resource_data = await fetch_resource_details(client, raw_url)
     if not resource_data:
@@ -882,6 +903,37 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
             pass
         return
 
+    # 5. 验证触发节点的时间戳 - 防止处理旧事件
+    # 检查触发节点的创建时间是否在通知的更新时间之前（说明是旧的 @mention）
+    # 这可以防止 issue 关闭等事件触发 workflow（这些事件会发送通知，但没有新的 @mention）
+    notification_updated_at = note.get("updated_at")
+    if notification_updated_at and trigger_node.created_at:
+        try:
+            # 解析时间戳（ISO 8601 格式）
+            note_time = datetime.fromisoformat(notification_updated_at.replace("Z", "+00:00"))
+            trigger_time = datetime.fromisoformat(trigger_node.created_at.replace("Z", "+00:00"))
+
+            # 如果触发节点的创建时间比通知更新时间早很多（超过 1 分钟）
+            # 说明这不是新的 @mention，而是旧事件的后续通知（如 issue 关闭）
+            time_diff = (note_time - trigger_time).total_seconds()
+            if time_diff > 60:  # 超过 1 分钟
+                logger.warning(f"Trigger node is too old (created {time_diff:.0f}s before notification update). This might be an event notification (e.g., issue closed) rather than a new @mention.")
+                logger.warning(f"Notification updated_at: {notification_updated_at}, Trigger created_at: {trigger_node.created_at}")
+                # 标记为已读但不触发 workflow
+                try:
+                    await client.patch(
+                        f"{REST_API}/notifications/threads/{thread_id}",
+                        headers={"Authorization": f"token {BOT_TOKEN}"}
+                    )
+                except:
+                    pass
+                return
+            else:
+                logger.info(f"Trigger node time check passed (time diff: {time_diff:.0f}s)")
+        except Exception as e:
+            logger.warning(f"Could not parse timestamps for validation: {e}")
+            # 继续处理，但记录警告
+
     # 验证触发消息是否存在
     if not trigger_node.body or not trigger_node.body.strip():
         logger.error(f"Trigger node {trigger_node.id} has empty body. Cannot proceed with workflow.")
@@ -899,7 +951,7 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
             pass
         return
 
-    # 5. 构建完整上下文（使用修复后的build_rich_context）
+    # 6. 构建完整上下文（使用修复后的build_rich_context）
     context = build_rich_context(resource_data, timeline_items, trigger_node, raw_url, thread_id)
 
     # 6. 获取diff内容（根据触发类型决定）
