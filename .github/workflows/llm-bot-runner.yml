@@ -1,3 +1,5 @@
+# yamllint disable rule:line-length
+---
 name: LLM Bot Runner
 
 on:
@@ -36,7 +38,10 @@ jobs:
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues" \
             -d "{\"title\":\"$ISSUE_TITLE\",\"body\":\"$ISSUE_BODY\"}")
 
-          ISSUE_NUMBER=$(echo "$ISSUE_RESPONSE" | grep -o '\"number\":[[:space:]]*[0-9]*' | cut -d':' -f2 | tr -d ' ')
+          ISSUE_NUMBER=$(echo "$ISSUE_RESPONSE" | \
+            grep -o '\"number\":[[:space:]]*[0-9]*' | \
+            cut -d':' -f2 | \
+            tr -d ' ')
 
           if [ -n "$ISSUE_NUMBER" ]; then
             echo "日志issue已创建，编号: $ISSUE_NUMBER"
@@ -93,11 +98,13 @@ jobs:
           # 下载安装脚本并检查内容
           curl -fsSL https://claude.ai/install.sh -o install_claude.sh
           # 检查脚本是否包含危险操作
-          if grep -q "cp.*remove" install_claude.sh || grep -q "rm.*/usr/local" install_claude.sh; then
+          if grep -q "cp.*remove" install_claude.sh || \
+             grep -q "rm.*/usr/local" install_claude.sh; then
             echo "警告：安装脚本包含可能危险的操作，尝试使用--prefix安装到用户目录"
             # 尝试使用--prefix选项安装到用户目录，避免系统目录权限问题
             if grep -q "--prefix" install_claude.sh; then
-              bash install_claude.sh --prefix=$HOME/.local || echo "使用--prefix安装失败，尝试默认安装"
+              bash install_claude.sh --prefix=$HOME/.local || \
+                echo "使用--prefix安装失败，尝试默认安装"
             fi
             # 如果上面失败或没有--prefix，尝试默认安装（可能失败）
             bash install_claude.sh || echo "安装失败，但继续执行工作流"
@@ -144,7 +151,8 @@ jobs:
           # 添加Context7 HTTP服务器（如果CONTEXT7_API_KEY已设置）
           if [ -n "$CONTEXT7_API_KEY" ]; then
             echo "添加Context7 HTTP服务器..."
-            claude mcp add --transport http context7 https://mcp.context7.com/mcp \
+             claude mcp add --transport http context7 \
+               https://mcp.context7.com/mcp \
               --header "CONTEXT7_API_KEY: $CONTEXT7_API_KEY"
           else
             echo "警告: CONTEXT7_API_KEY未设置，跳过Context7服务器添加"
@@ -157,7 +165,8 @@ jobs:
           set -euo pipefail
           echo "配置Git用户信息..."
           git config --global user.name "WhiteElephantIsNotARobot"
-          git config --global user.email "257136373+WhiteElephantIsNotARobot@users.noreply.github.com"
+           git config --global user.email \
+             "257136373+WhiteElephantIsNotARobot@users.noreply.github.com"
 
           echo "配置SSH认证..."
           # 创建SSH目录
@@ -189,7 +198,9 @@ jobs:
             echo "GPG私钥已导入"
 
             # 获取GPG密钥ID
-            GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG "257136373+WhiteElephantIsNotARobot@users.noreply.github.com" 2>/dev/null | grep sec | awk '{print $2}' | cut -d'/' -f2)
+            GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG \
+              "257136373+WhiteElephantIsNotARobot@users.noreply.github.com" \
+              2>/dev/null | grep sec | awk '{print $2}' | cut -d'/' -f2)
             if [ -n "$GPG_KEY_ID" ]; then
               # 配置git使用GPG签名
               git config --global user.signingkey "$GPG_KEY_ID"
@@ -222,8 +233,9 @@ jobs:
           # 不直接cat内容，避免日志污染
           echo ""
 
-          # 构建新任务字符串，包含读取context.json的指示
-          ENHANCED_TASK=$(printf "%s\n\n> 任务上下文已保存到/home/runner/context.json，共%s字符。阅读该文件以了解上下文！" "$LLM_TASK" "$CONTEXT_CHARS")
+           # 构建包含context.json指示的新任务字符串
+           ENHANCED_TASK=$(printf "%s\n\n> 任务上下文已保存到/home/runner/context.json，共%s字符。阅读该文件以了解上下文！" \
+             "$LLM_TASK" "$CONTEXT_CHARS")
           echo "增强任务: $ENHANCED_TASK"
 
           claude \
@@ -238,7 +250,8 @@ jobs:
 
           # 自查
           claude \
-            -p "请快速自查是否在 GitHub 留下回复，如果否，请根据要求在 GitHub 中留下回复（但先检查是否已有回复，避免重复回复）。另请快速检查工作区，确保所有更改都已经提交并推送（若有），确保 PR 已存在（若fork中有commit），任何未推送的更改都将在此会话结束后被永久销毁！" \
+             -p "请快速自查是否在 GitHub 留下回复，如果否，请根据要求在 GitHub 中留下回复（但先检查是否已有回复，避免重复回复）。" \
+             "另请快速检查工作区，确保所有更改都已经提交并推送（若有），确保 PR 已存在（若fork中有commit），任何未推送的更改都将在此会话结束后被永久销毁！" \
             --system-prompt "$SYSTEM_PROMPT" \
             --allowedTools "Bash,TaskOutput,Edit,ExitPlanMode,Glob,Grep,KillShell,MCPSearch,NotebookEdit,Read,Skill,Task,TaskCreate,TaskGet,TaskList,TaskUpdate,WebFetch,WebSearch,Write,mcp__ddg-search__*,mcp__context7__*" \
             --output-format=stream-json \
@@ -250,7 +263,8 @@ jobs:
 
           # 再次自查
           claude \
-            -p "请再次确认：所有更改都已经提交并推送（若有），并且 PR 已存在（若fork有commit），任何未推送的更改都将在此会话结束后被永久销毁！" \
+             -p "请再次确认：所有更改都已经提交并推送（若有），并且 PR 已存在（若fork有commit），" \
+             "任何未推送的更改都将在此会话结束后被永久销毁！" \
             --system-prompt "$SYSTEM_PROMPT" \
             --allowedTools "Bash,TaskOutput,Edit,ExitPlanMode,Glob,Grep,KillShell,MCPSearch,NotebookEdit,Read,Skill,Task,TaskCreate,TaskGet,TaskList,TaskUpdate,WebFetch,WebSearch,Write,mcp__ddg-search__*,mcp__context7__*" \
             --output-format=stream-json \
