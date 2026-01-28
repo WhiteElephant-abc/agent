@@ -28,28 +28,26 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 标题永远安全
           ISSUE_TITLE="[工作流] Run ${{ github.run_id }}"
 
-          # 写入 task（任意多行都安全）
+          # --- Task：直接原样输出，不用代码块 ---
           printf "%s" "${{ inputs.task }}" > task.txt
 
-          # 写入 context（任意多行都安全）
+          # --- Context：写入原文 ---
           printf "%s" "${{ inputs.context }}" > raw_context.txt
 
-          # 尝试格式化 context
-          if jq empty raw_context.txt 2>/dev/null; then
-            jq '.' raw_context.txt > context.json
-          else
-            jq -Rn --arg v "$(cat raw_context.txt)" '$v' > context.json
-          fi
+          # --- 去掉最外层引号（如果有） ---
+          # 例如："{"a":1}" → {"a":1}
+          sed 's/^"//; s/"$//' raw_context.txt > context_stripped.txt
 
-          # 生成最终 Markdown body
+          # --- 用 jq 格式化（如果不是 JSON 会直接失败） ---
+          # 你要求“只去掉引号再格式化”，所以这里不做 fallback
+          jq '.' context_stripped.txt > context.json
+
+          # --- 生成 Markdown（Task 不用代码块，Context 用 JSON 代码块） ---
           {
             echo "## Task"
-            echo '```text'
             cat task.txt
-            echo '```'
             echo
             echo "## Context"
             echo '```json'
@@ -57,14 +55,13 @@ jobs:
             echo '```'
           } > body.md
 
-          # 用 jq 构造 JSON，避免任何转义问题
+          # --- 构造 payload ---
           PAYLOAD=$(jq -n \
             --arg title "$ISSUE_TITLE" \
             --arg body "$(cat body.md)" \
             '{title:$title, body:$body}')
 
-          echo "创建日志 issue..."
-
+          # --- 创建 issue ---
           ISSUE_RESPONSE=$(curl -s -X POST \
             -H "Authorization: token $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
@@ -74,11 +71,9 @@ jobs:
           ISSUE_NUMBER=$(echo "$ISSUE_RESPONSE" | jq -r '.number')
 
           if [ "$ISSUE_NUMBER" != "null" ]; then
-            echo "日志 issue 已创建，编号: $ISSUE_NUMBER"
             echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
           else
-            echo "警告: 无法创建 issue"
-            echo "响应: $ISSUE_RESPONSE"
+            echo "Issue 创建失败: $ISSUE_RESPONSE"
           fi
 
   run-llm-bot:
