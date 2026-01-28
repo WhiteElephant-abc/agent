@@ -191,15 +191,16 @@ jobs:
 
       - name: Run Claude Code
         run: |
-          # 创建路径软链接，将深层目录映射到根路径
+          # 使用bind mount将深层目录映射到根路径，避免软链接被解析
           echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
-          ls -la "$GITHUB_WORKSPACE" 2>/dev/null || echo "无法列出GITHUB_WORKSPACE目录"
-          sudo ln -s "$GITHUB_WORKSPACE" /app
+
+          # 创建/app目录并绑定挂载
+          sudo mkdir -p /app
+          sudo mount --bind "$GITHUB_WORKSPACE" /app
+
           # 切换到简洁的/app目录运行Claude Code
           cd /app
           echo "当前工作目录: $(pwd)"
-          echo "软链接目标: $(readlink -f /app 2>/dev/null || echo '无法解析软链接')"
-          ls -la /app 2>/dev/null || echo "无法列出/app目录"
           echo "运行Claude Code..."
           echo "原始任务: $LLM_TASK"
           echo "系统提示词长度: ${#SYSTEM_PROMPT} 字符"
