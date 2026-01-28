@@ -58,7 +58,7 @@ agent/
 ├── system_prompt.md            # Claude Code 系统提示词
 ├── requirements.txt            # Python 依赖
 ├── .gitignore
-├── LICENSE                     # AGPL-3.0 许可证
+├── LICENSE                     # GPL-3.0 许可证
 ├── README.md                   # 本文档
 ├── .github/
 │   └── workflows/
@@ -118,9 +118,11 @@ class TaskContext(BaseModel):
     event_id: str                # 通知 ID
 
     # 内容
-    pr_title/pr_body: str        # PR 标题和正文
+    pr_title: str                # PR 标题
+    pr_body: str                 # PR 正文
     issue_body: str              # Issue 正文
-    discussion_title/discussion_body: str
+    discussion_title: str        # Discussion 标题
+    discussion_body: str         # Discussion 正文
 
     # 历史记录
     comments_history: List[Dict]     # 普通评论
@@ -130,8 +132,10 @@ class TaskContext(BaseModel):
     # 代码上下文
     diff_content: str           # PR diff
     clone_url: str              # SSH 克隆地址
-    head_ref/base_ref: str      # 分支信息
-    head_repo/base_repo: str    # repo:branch 格式
+    head_ref: str               # head 分支
+    base_ref: str               # base 分支
+    head_repo: str              # head repo:branch 格式
+    base_repo: str              # base repo:branch 格式
 ```
 
 ## 环境变量配置
@@ -306,7 +310,7 @@ CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
 
 ## 许可证
 
-本项目采用 [AGPL-3.0 许可证](LICENSE)。
+本项目采用 [GPL-3.0 许可证](LICENSE)。
 
 ## 相关文档
 
