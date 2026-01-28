@@ -1021,10 +1021,6 @@ async def poll_loop():
                 )
 
                 if r.status_code == 200:
-                    # 调试：输出响应头信息
-                    logger.info(f"Response headers: {dict(r.headers)}")
-                    if "X-Poll-Interval" in r.headers:
-                        logger.info(f"X-Poll-Interval header found: {r.headers['X-Poll-Interval']}")
                     # 解析并更新轮询间隔（遵守GitHub的X-Poll-Interval要求）
                     if "X-Poll-Interval" in r.headers:
                         try:
@@ -1045,10 +1041,6 @@ async def poll_loop():
 
                 elif r.status_code == 304:
                     logger.debug("No changes in notifications (304).")
-                    # 调试：输出响应头信息
-                    logger.info(f"304 Response headers: {dict(r.headers)}")
-                    if "X-Poll-Interval" in r.headers:
-                        logger.info(f"304 X-Poll-Interval header found: {r.headers['X-Poll-Interval']}")
                     # 即使返回304，GitHub可能仍然包含X-Poll-Interval头部
                     if "X-Poll-Interval" in r.headers:
                         try:
