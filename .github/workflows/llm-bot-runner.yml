@@ -17,66 +17,34 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       issues: write
-    env:
-      GITHUB_TOKEN: ${{ github.token }}
     outputs:
       issue_number: ${{ steps.create-issue.outputs.issue_number }}
 
     steps:
       - name: Create log issue
         id: create-issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TASK_CONTENT: ${{ inputs.task }}
+          CONTEXT_RAW: ${{ inputs.context }}
         run: |
-          set -euo pipefail
+          # 1. 格式化 Context (去除外层引号并格式化 JSON)
+          # 如果 CONTEXT_RAW 本身就是 JSON 字符串，jq 可以直接解析
+          FORMATTED_CONTEXT=$(echo "$CONTEXT_RAW" | sed 's/^"//; s/"$//' | jq '.')
 
-          ISSUE_TITLE="[工作流] Run ${{ github.run_id }}"
+          # 2. 构建 Markdown 正文
+          # 使用 printf 避免 echo 的转义问题
+          printf "## Task\n%s\n\n## Context\n\`\`\`json\n%s\n\`\`\`" \
+            "$TASK_CONTENT" "$FORMATTED_CONTEXT" > body.md
 
-          # --- Task：直接写入，不用代码块 ---
-          cat > task.txt <<EOF
-${{ inputs.task }}
-EOF
+          # 3. 使用 GitHub CLI 创建 Issue
+          ISSUE_URL=$(gh issue create \
+            --title "[工作流] Run ${{ github.run_id }}" \
+            --body-file body.md)
 
-          # --- Context：安全写入，不会被拆行 ---
-          cat > raw_context.txt <<EOF
-${{ inputs.context }}
-EOF
-
-          # --- 去掉最外层引号 ---
-          sed 's/^"//; s/"$//' raw_context.txt > context_stripped.txt
-
-          # --- 格式化 JSON（你要求只做这一步） ---
-          jq '.' context_stripped.txt > context.json
-
-          # --- 生成 Markdown ---
-          {
-            echo "## Task"
-            cat task.txt
-            echo
-            echo "## Context"
-            echo '```json'
-            cat context.json
-            echo '```'
-          } > body.md
-
-          # --- 构造 payload ---
-          PAYLOAD=$(jq -n \
-            --arg title "$ISSUE_TITLE" \
-            --arg body "$(cat body.md)" \
-            '{title:$title, body:$body}')
-
-          # --- 创建 issue ---
-          ISSUE_RESPONSE=$(curl -s -X POST \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -d "$PAYLOAD" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues")
-
-          ISSUE_NUMBER=$(echo "$ISSUE_RESPONSE" | jq -r '.number')
-
-          if [ "$ISSUE_NUMBER" != "null" ]; then
-            echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
-          else
-            echo "Issue 创建失败: $ISSUE_RESPONSE"
-          fi
+          # 4. 提取 Issue 编号 (从 URL 结尾提取)
+          ISSUE_NUMBER=${ISSUE_URL##*/}
+          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
 
   run-llm-bot:
     needs: create-issue
