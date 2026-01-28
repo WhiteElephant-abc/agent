@@ -192,22 +192,27 @@ jobs:
       - name: Run Claude Code
         run: |
           # 创建路径软链接，将深层目录映射到根路径
+          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+          ls -la "$GITHUB_WORKSPACE" 2>/dev/null || echo "无法列出GITHUB_WORKSPACE目录"
           sudo ln -s "$GITHUB_WORKSPACE" /app
           # 切换到简洁的/app目录运行Claude Code
           cd /app
+          echo "当前工作目录: $(pwd)"
+          echo "软链接目标: $(readlink -f /app 2>/dev/null || echo '无法解析软链接')"
+          ls -la /app 2>/dev/null || echo "无法列出/app目录"
           echo "运行Claude Code..."
           echo "原始任务: $LLM_TASK"
           echo "系统提示词长度: ${#SYSTEM_PROMPT} 字符"
 
-          # 将JSON上下文写入文件（保存到/home/runner/目录）
-          echo "$LLM_CONTEXT" > /home/runner/context.json
-          CONTEXT_CHARS=$(wc -m < /home/runner/context.json)
+          # 将JSON上下文写入文件（保存到/app目录）
+          echo "$LLM_CONTEXT" > /app/context.json
+          CONTEXT_CHARS=$(wc -m < /app/context.json)
           echo "上下文文件大小: $CONTEXT_CHARS 字符"
           # 不直接cat内容，避免日志污染
           echo ""
 
           # 构建新任务字符串，包含读取context.json的指示
-          ENHANCED_TASK=$(printf "%s\n\n> 任务上下文已保存到/home/runner/context.json，共%s字符。阅读该文件以了解上下文！" "$LLM_TASK" "$CONTEXT_CHARS")
+          ENHANCED_TASK=$(printf "%s\n\n> 任务上下文已保存到/app/context.json，共%s字符。阅读该文件以了解上下文！" "$LLM_TASK" "$CONTEXT_CHARS")
           echo "增强任务: $ENHANCED_TASK"
 
           claude \
