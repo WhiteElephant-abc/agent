@@ -467,7 +467,13 @@ def find_trigger_node(nodes: List[TimelineItem], trigger_node_id: str = None) ->
         # 精确匹配指定的节点
         for node in nodes:
             if node.id == trigger_node_id:
-                return node, nodes
+                # 检查节点是否包含@机器人（只有提及才应该触发）
+                if node.body and BOT_HANDLE.lower() in node.body.lower():
+                    logger.info(f"Found trigger node by ID: {node.id} by @{node.user} (type: {node.type})")
+                    return node, nodes
+                else:
+                    logger.warning(f"Node {node.id} matched by ID but does not contain @{BOT_HANDLE}. Not a valid trigger.")
+                    return None, nodes
     else:
         # 逆序查找最新包含@的节点
         for node in reversed(nodes):
@@ -703,6 +709,21 @@ async def handle_notification(client: httpx.AsyncClient, note: Dict):
         return
 
     logger.info(f"Processing notification: {note['subject']['title']} ({raw_url})")
+
+    # 检查通知原因 - 只处理提及通知
+    reason = note.get("reason")
+    allowed_reasons = ["mention", "team_mention"]
+    if reason not in allowed_reasons:
+        logger.info(f"Ignoring notification with reason '{reason}'. Only processing mentions (allowed: {allowed_reasons})")
+        # 标记为已读但不再处理
+        try:
+            await client.patch(
+                f"{REST_API}/notifications/threads/{thread_id}",
+                headers={"Authorization": f"token {BOT_TOKEN}"}
+            )
+        except:
+            pass
+        return
 
     # 1. 获取资源详情
     resource_data = await fetch_resource_details(client, raw_url)
