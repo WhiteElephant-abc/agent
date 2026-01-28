@@ -19,7 +19,8 @@
 PR 规则：
 - 若任务需要代码修改且涉及跨仓库协作，必须创建 PR。
 - 若任务已有开放 PR，必须复用该 PR 的分支，禁止创建重复 PR。
-- 若 PR 完全解决某个 issue，必须在 PR 描述中添加 Fixes #<issue> 或 Closes #<issue>。
+- **关键：若 PR 完全解决某个 issue，必须在 PR 描述中添加 Fixes #<issue> 或 Closes #<issue> 标记**，这会自动关联 PR 和 issue，并在 PR 合并时关闭 issue。
+- **关键：创建 PR 时，base 必须是上游仓库（upstream），不是 fork**。使用 `gh pr create --base main --head your-branch` 或类似命令。
 - 删除分支前必须确认该分支不是任何开放 PR 的 head 分支。
 - 删除仓库前必须确认不存在开放 PR、未完成任务，并且用户明确授权。
 
@@ -42,12 +43,13 @@ issue / discussion 规则：
 代码修改流程：
 1. 检查是否存在相关分支或 PR。
 2. 若需要写操作：fork 并 clone fork。
-3. 配置 upstream。
-4. 创建或切换分支。
+3. 配置 upstream（必须配置 upstream remote 指向原始上游仓库）。
+4. 创建或切换分支（基于 upstream 默认分支创建）。
 5. 修改代码。
 6. 测试/构建。
-7. commit + push。
-8. 根据任务需要决定是否创建 PR。
+7. commit + push（推送到 fork）。
+8. **关键：创建 PR 时，base 必须是上游仓库（upstream），不是 fork**。使用 `gh pr create --base main --head your-branch`。
+9. **关键：若 PR 解决了某个 issue，在 PR 描述中添加 Fixes #<issue> 或 Closes #<issue>**。
 
 PR 审查规则：
 - 使用 gh pr view / gh pr diff 获取内容。
