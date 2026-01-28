@@ -84,13 +84,33 @@ jobs:
 
       - name: Install Claude CLI
         run: |
-          curl -fsSL https://claude.ai/install.sh | bash
+          set -euo pipefail
+          # 检查claude是否已经安装
+          if command -v claude &> /dev/null; then
+            echo "claude已经安装，跳过安装步骤"
+            exit 0
+          fi
+          # 下载安装脚本并检查内容
+          curl -fsSL https://claude.ai/install.sh -o install_claude.sh
+          # 检查脚本是否包含危险操作
+          if grep -q "cp.*remove" install_claude.sh || grep -q "rm.*/usr/local" install_claude.sh; then
+            echo "警告：安装脚本包含可能危险的操作，尝试使用--prefix安装到用户目录"
+            # 尝试使用--prefix选项安装到用户目录，避免系统目录权限问题
+            if grep -q "--prefix" install_claude.sh; then
+              bash install_claude.sh --prefix=$HOME/.local || echo "使用--prefix安装失败，尝试默认安装"
+            fi
+            # 如果上面失败或没有--prefix，尝试默认安装（可能失败）
+            bash install_claude.sh || echo "安装失败，但继续执行工作流"
+          else
+            bash install_claude.sh
+          fi
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
       - name: Validate tokens
         run: |
+          set -euo pipefail
           echo "验证环境变量..."
           # 验证GitHub令牌
           if [ -z "$GITHUB_TOKEN" ]; then
@@ -116,6 +136,7 @@ jobs:
 
       - name: Add MCP servers
         run: |
+          set -euo pipefail
           # 添加DuckDuckGo搜索服务器
           echo "添加DuckDuckGo搜索服务器..."
           claude mcp add ddg-search -- uvx duckduckgo-mcp-server
@@ -133,6 +154,7 @@ jobs:
 
       - name: Pre-configure Git
         run: |
+          set -euo pipefail
           echo "配置Git用户信息..."
           git config --global user.name "WhiteElephantIsNotARobot"
           git config --global user.email "257136373+WhiteElephantIsNotARobot@users.noreply.github.com"
@@ -188,6 +210,7 @@ jobs:
 
       - name: Run Claude Code
         run: |
+          set -euo pipefail
           echo "运行Claude Code..."
           echo "原始任务: $LLM_TASK"
           echo "系统提示词长度: ${#SYSTEM_PROMPT} 字符"
