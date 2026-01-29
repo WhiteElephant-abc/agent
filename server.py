@@ -640,22 +640,26 @@ def build_rich_context(
         # 获取触发类型
         trigger_type = trigger_node.type if trigger_node else None
 
+        # reviews_history: 始终保留所有 review 批次（完整历史）
+        for item in timeline_items:
+            if item.type == "review":
+                reviews_history.append({
+                    "id": item.id,
+                    "user": item.user,
+                    "body": item.body,
+                    "state": item.state,
+                    "submitted_at": item.created_at
+                })
+                logger.info(f"Including review {item.id} in reviews_history")
+
         # review批次使用原始timeline_items确保完整保留（不截断）
         if trigger_type in ["review", "review_comment"]:
-            # review/review_comment触发：精确过滤，只保留与当前review相关的项目
+            # review/review_comment触发：保留所有review批次，同时精确过滤review comments
             trigger_review_id = trigger_node.review_id if trigger_node.review_id else trigger_node.id
 
             for item in timeline_items:
-                if item.type == "review" and item.id == trigger_review_id:
-                    reviews_history.append({
-                        "id": item.id,
-                        "user": item.user,
-                        "body": item.body,
-                        "state": item.state,
-                        "submitted_at": item.created_at
-                    })
-                    logger.info(f"Including review {item.id} for review {trigger_review_id}")
-                elif item.type == "review_comment" and item.review_id and item.review_id == trigger_review_id:
+                # review_comments_batch: 只保留与当前触发 review 相关的 review comments
+                if item.type == "review_comment" and item.review_id and item.review_id == trigger_review_id:
                     review_comments_batch.append({
                         "id": item.id,
                         "user": item.user,
@@ -665,7 +669,7 @@ def build_rich_context(
                     })
                     logger.info(f"Including review comment {item.id} for review {trigger_review_id}")
         else:
-            # comment触发：使用truncated_items处理评论，使用原始timeline_items处理review批次
+            # comment触发：使用truncated_items处理评论
             for item in truncated_items:
                 if item.type == "comment":
                     comments_history.append({
@@ -674,17 +678,6 @@ def build_rich_context(
                         "body": item.body,
                         "created_at": item.created_at,
                         "type": item.type
-                    })
-
-            # reviews_history: 始终保留所有 review 批次（完整历史）
-            for item in timeline_items:
-                if item.type == "review":
-                    reviews_history.append({
-                        "id": item.id,
-                        "user": item.user,
-                        "body": item.body,
-                        "state": item.state,
-                        "submitted_at": item.created_at
                     })
 
             # review_comments_batch: 只保留最新批次的 review comments
