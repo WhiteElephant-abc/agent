@@ -1,16 +1,8 @@
 name: LLM Bot Runner
 
 on:
-  workflow_dispatch:
-    inputs:
-      task:
-        description: 'LLM的任务描述'
-        required: true
-        type: string
-      context:
-        description: '任务的JSON上下文'
-        required: true
-        type: string
+  repository_dispatch:
+    types: [llm-bot-run]
 
 jobs:
   create-issue:
@@ -54,8 +46,8 @@ jobs:
     needs: create-issue
     runs-on: ubuntu-latest
     env:
-      LLM_TASK: ${{ inputs.task }}
-      LLM_CONTEXT: ${{ inputs.context }}
+      LLM_TASK: ${{ github.event.client_payload.task }}
+      LLM_CONTEXT: ${{ github.event.client_payload.context }}
       LOG_ISSUE_NUMBER: ${{ needs.create-issue.outputs.issue_number }}
       # GitHub身份令牌（4个名称都设置）- 使用agent的token
       GITHUB_TOKEN: ${{ secrets.WEINAR_API_KEY }}

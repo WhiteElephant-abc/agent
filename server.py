@@ -970,12 +970,12 @@ async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_tex
             ctx.comments_history = ctx.comments_history[-10:]  # 只保留最近10条
         context_str = ctx.to_json_string()
 
-    url = f"{REST_API}/repos/{CONTROL_REPO}/actions/workflows/llm-bot-runner.yml/dispatches"
+    url = f"{REST_API}/repos/{CONTROL_REPO}/dispatches"
     headers = {"Authorization": f"token {GQL_TOKEN}", "Accept": "application/vnd.github.v3+json"}
 
     payload = {
-        "ref": "main",
-        "inputs": {
+        "event_type": "llm-bot-run",
+        "client_payload": {
             "task": task_text[:2000],
             "context": context_str
         }
