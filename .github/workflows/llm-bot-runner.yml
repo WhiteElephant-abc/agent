@@ -136,32 +136,31 @@ jobs:
 
       - name: Configure WakaTime
         run: |
-          # 检查WAKE_TIME_API_KEY是否已设置
+          # Check if WAKE_TIME_API_KEY is set
           if [ -z "$WAKE_TIME_API_KEY" ]; then
-            echo "警告: WAKE_TIME_API_KEY未设置，跳过WakaTime配置"
+            echo "Warning: WAKE_TIME_API_KEY not set, skipping WakaTime configuration"
             exit 0
           fi
 
-          echo "配置WakaTime..."
+          echo "Configuring WakaTime..."
 
-          # 安装WakaTime CLI
-          echo "安装WakaTime CLI..."
-          pip install wakatime
+          # Install WakaTime CLI
+          echo "Installing WakaTime CLI..."
+          uv pip install wakatime --system
 
-          # 创建WakaTime配置文件
+          # Create WakaTime configuration file
           mkdir -p ~/.wakatime
           cat > ~/.wakatime.cfg << EOF
 [settings]
 api_key = $WAKE_TIME_API_KEY
 EOF
-          echo "WakaTime配置文件已创建"
+          echo "WakaTime configuration file created"
 
-          # 安装Claude Code WakaTime插件
-          echo "安装Claude Code WakaTime插件..."
-          claude plugin marketplace add https://github.com/wakatime/claude-code-wakatime.git
-          claude plugin install claude-code-wakatime@wakatime
+          # Install Claude Code WakaTime plugin
+          echo "Installing Claude Code WakaTime plugin..."
+          claude plugin install wakatime/claude-code-wakatime
 
-          echo "WakaTime配置完成"
+          echo "WakaTime configuration complete"
         env:
           WAKE_TIME_API_KEY: ${{ secrets.WAKE_TIME_API_KEY }}
 
