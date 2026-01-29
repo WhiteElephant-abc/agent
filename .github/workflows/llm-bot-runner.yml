@@ -134,6 +134,28 @@ jobs:
         env:
           CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
 
+      - name: Configure WakaTime
+        run: |
+          # 安装WakaTime插件
+          echo "安装WakaTime插件..."
+          claude plugin marketplace add https://github.com/wakatime/claude-code-wakatime.git
+          claude plugin i claude-code-wakatime@wakatime
+
+          # 配置WakaTime API Key
+          if [ -n "$WAKE_TIME_API_KEY" ]; then
+            echo "配置WakaTime API Key..."
+            mkdir -p ~
+            cat << EOF > ~/.wakatime.cfg
+[settings]
+api_key = $WAKE_TIME_API_KEY
+EOF
+            echo "WakaTime配置完成"
+          else
+            echo "警告: WAKE_TIME_API_KEY未设置，跳过WakaTime配置"
+          fi
+        env:
+          WAKE_TIME_API_KEY: ${{ secrets.WAKE_TIME_API_KEY }}
+
       - name: Pre-configure Git
         run: |
           echo "配置Git用户信息..."
