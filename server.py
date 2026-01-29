@@ -472,14 +472,17 @@ def find_trigger_node(nodes: List[TimelineItem], trigger_node_id: str = None) ->
                     logger.info(f"Found trigger node by ID: {node.id} by @{node.user} (type: {node.type})")
                     return node, nodes
                 else:
-                    logger.warning(f"Node {node.id} matched by ID but does not contain @{BOT_HANDLE}. Not a valid trigger.")
-                    return None, nodes
-    else:
-        # 逆序查找最新包含@的节点
-        for node in reversed(nodes):
-            if node.body and BOT_HANDLE.lower() in node.body.lower():
-                logger.info(f"Found trigger node: {node.id} by @{node.user} (type: {node.type})")
-                return node, nodes
+                    # 当通过ID找到的节点不包含@时，继续搜索其他包含@的节点
+                    # 例如：latest_comment_url 可能指向 review 本身，但 @ 提及在 review comment 中
+                    logger.warning(f"Node {node.id} matched by ID but does not contain @{BOT_HANDLE}. Falling back to search for @ mention.")
+                    break  # 退出精确匹配循环，继续下面的搜索
+
+    # 逆序查找最新包含@的节点
+    # 无论是否指定了 trigger_node_id，都搜索包含@的节点
+    for node in reversed(nodes):
+        if node.body and BOT_HANDLE.lower() in node.body.lower():
+            logger.info(f"Found trigger node: {node.id} by @{node.user} (type: {node.type})")
+            return node, nodes
 
     return None, nodes
 
