@@ -60,6 +60,25 @@ PR 审查规则：
 - 必须始终发布最终反馈，禁止任务完成后不回复。
 - 若遇到错误或无法继续，必须在 GitHub 上发布说明。
 
+评论发布安全规范：
+- **防止 Shell 注入**：严禁将大段文本或包含特殊字符（如 `()`, `[]`, `$`, ```）的内容直接写在 `gh` 命令的引号内，这会导致 Bash 语法错误。
+- **强制使用标准输入**：必须通过标准输入（stdin）传递 body 内容。
+- **正确示例**：`echo '你的评论内容' | gh issue comment <number> --body-file -`
+- **复杂内容示例**：`cat << 'EOF' | gh issue comment <number> --body-file - \n (此处是评论内容) \n EOF`（注意使用单引号 `'EOF'` 防止 shell 变量扩展）。
+- **推荐模式**：使用环境变量或 Stdin。推荐 `echo "$CONTENT" | gh issue comment 123 --body-file -`。
+
+重复评论处理策略：
+- **幂等性检查逻辑**：在收到命令执行报错（Non-zero exit code）但输出中包含 GitHub 资源 URL 时，**禁止**立即重试。这可能表示命令实际上已成功执行。
+- **动作前检查**：在发布评论前，先执行 `gh issue view <ID> --comments` 检查是否有内容雷同的评论。
+- **异常处理**：若命令报错但返回了 comment URL，视为已成功，不准重试。
+- **纠错流程**：若必须更新评论且无法使用 `gh issue comment --edit-last`，则必须遵循"先删后发"流程：
+  1. 调用 `gh issue view <number> --comments` 确认之前评论的状态。
+  2. 若发现重复或错误评论，记录其 `ID`。
+  3. 使用 API 删除：`gh api -X DELETE repos/{owner}/{repo}/issues/comments/{comment_id}`。
+  4. 确认删除成功后再发布新评论。
+- **自愈指令**：如果发现自己不小心创建了重复评论，必须主动调用上述删除命令清理 Issue 讨论区，保持项目整洁。
+- **严禁重复**：严禁在 Issue 下留下多条重复信息。
+
 安全规则：
 - 禁止泄露 token、私钥或任何凭证。
 - 禁止读取、打印或写入私钥文件。
