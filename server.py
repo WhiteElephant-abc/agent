@@ -687,29 +687,15 @@ def build_rich_context(
                         "submitted_at": item.created_at
                     })
 
-            # review_comments_batch: 只保留最新批次的 review（包括 review 本身和相关 review comments）
+            # review_comments_batch: 只保留最新批次的 review comments
             # 找到最新一次 review 的 ID（按时间顺序，最后一个是最新）
-            latest_review = None
             latest_review_id = None
             for item in timeline_items:
                 if item.type == "review":
-                    latest_review = item
                     latest_review_id = item.id
 
-            # 只保留最新 review 及其相关的 review comments
+            # 只保留与最新 review 相关的 review comments
             if latest_review_id:
-                # 1. 添加最新 review 本身到 batch
-                review_comments_batch.append({
-                    "id": latest_review.id,
-                    "user": latest_review.user,
-                    "body": latest_review.body,
-                    "state": latest_review.state,
-                    "submitted_at": latest_review.created_at,
-                    "type": "review"
-                })
-                logger.info(f"Added latest review {latest_review_id} to review_comments_batch")
-
-                # 2. 添加与最新 review 相关的 review comments
                 for item in timeline_items:
                     if item.type == "review_comment" and item.review_id == latest_review_id:
                         review_comments_batch.append({
@@ -717,8 +703,7 @@ def build_rich_context(
                             "user": item.user,
                             "body": item.body,
                             "path": item.path,
-                            "diff_hunk": item.diff_hunk,
-                            "type": "review_comment"
+                            "diff_hunk": item.diff_hunk
                         })
 
         if comments_history:
