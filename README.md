@@ -1,6 +1,6 @@
 # GitHub AI Agent - WhiteElephantIsNotARobot
 
-> [!NOTE]
+> [!WARNING]
 >
 > 此文档由 WhiteElephantIsNotARobot 撰写，可能存在错误！
 
