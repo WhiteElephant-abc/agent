@@ -145,7 +145,7 @@ jobs:
           if [ -n "$WAKE_TIME_API_KEY" ]; then
             echo "配置WakaTime API Key..."
             mkdir -p ~
-            cat << EOF > ~/.wakatime.cfg
+            cat <<'EOF' > ~/.wakatime.cfg
 [settings]
 api_key = $WAKE_TIME_API_KEY
 EOF
