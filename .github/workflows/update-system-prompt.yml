@@ -3,7 +3,7 @@ name: Update System Prompt
 on:
   push:
     paths:
-      - 'system_prompt.md'
+      - "system_prompt.md"
   workflow_dispatch:
 
 jobs:
@@ -12,7 +12,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-      actions: read   # 不依赖 GITHUB_TOKEN 写变量，所以不需要 actions:write
+      actions: read
 
     env:
       GH_TOKEN: ${{ secrets.REPOSITORY_VARIABLE_API_KEY }}
@@ -31,14 +31,12 @@ jobs:
             exit 1
           fi
 
-          SYSTEM_PROMPT_CONTENT=$(cat system_prompt.md)
+          SYSTEM_PROMPT_CONTENT="$(cat system_prompt.md)"
 
-          # 获取旧值
           OLD_VALUE=$(gh api \
             /repos/${{ github.repository }}/actions/variables/SYSTEM_PROMPT \
             --jq '.value' 2>/dev/null || echo "")
 
-          # 更新变量（使用 raw-field 支持多行）
           gh api --method PATCH \
             /repos/${{ github.repository }}/actions/variables/SYSTEM_PROMPT \
             --raw-field name=SYSTEM_PROMPT \
@@ -69,15 +67,18 @@ jobs:
       - name: Create diff issue
         run: |
           OLD_VALUE="${{ needs.update.outputs.old_value }}"
-          NEW_VALUE=$(cat system_prompt.md)
+          NEW_VALUE="$(cat system_prompt.md)"
 
           DIFF_CONTENT=$(diff -u <(echo "$OLD_VALUE") <(echo "$NEW_VALUE") || echo "No diff available")
 
-          ISSUE_BODY="[工作流运行 #${{ github.run_id }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          ISSUE_BODY=$(cat <<EOF
+[工作流运行 #${{ github.run_id }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
 \`\`\`diff
 $DIFF_CONTENT
-\`\`\`"
+\`\`\`
+EOF
+)
 
           gh issue create \
             --title "[工作流] 提示词更新 ${{ github.run_id }}" \
