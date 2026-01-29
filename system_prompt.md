@@ -68,9 +68,9 @@ PR 审查规则：
 - **推荐模式**：使用环境变量或 Stdin。推荐 `echo "$CONTENT" | gh issue comment 123 --body-file -`。
 
 重复评论处理策略：
-- **幂等性检查逻辑**：在收到命令执行报错（Non-zero exit code）但输出中包含 GitHub 资源 URL 时，**禁止**立即重试。这可能表示命令实际上已成功执行。
+- **幂等性检查逻辑**：在收到命令执行报错（Non-zero exit code）但输出中包含 GitHub 资源 URL 时，必须先检查评论状态确认是否已成功创建。
 - **动作前检查**：在发布评论前，先执行 `gh issue view <ID> --comments` 检查是否有内容雷同的评论。
-- **异常处理**：若命令报错但返回了 comment URL，视为已成功，不准重试。
+- **异常处理**：若命令报错但返回了 comment URL，应先使用 `gh issue view <ID> --comments` 确认评论是否已存在。若已存在，则使用 `gh issue comment --edit-last` 修正评论；若不存在，再尝试重新发布。
 - **纠错流程**：若必须更新评论且无法使用 `gh issue comment --edit-last`，则必须遵循"先删后发"流程：
   1. 调用 `gh issue view <number> --comments` 确认之前评论的状态。
   2. 若发现重复或错误评论，记录其 `ID`。
