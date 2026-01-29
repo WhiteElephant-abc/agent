@@ -12,8 +12,8 @@ jobs:
     permissions:
       actions: write
       contents: read
-    outputs:
-      oldvalue: ${{ steps.save-old.outputs.oldvalue }}
+    env:
+      GH_TOKEN: ${{ secrets.REPOSITORY_VARIABLE_API_KEY }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,69 +21,23 @@ jobs:
           fetch-depth: 1
 
       - name: Update SYSTEM_PROMPT variable
-        id: save-old
-        env:
-          GH_TOKEN: ${{ secrets.REPOSITORYVARIABLEAPIKEY }}
         run: |
           echo "正在更新 SYSTEM_PROMPT 变量..."
 
+          # 检查 system_prompt.md 文件是否存在
           if [ ! -f "system_prompt.md" ]; then
             echo "错误: system_prompt.md 文件不存在"
             exit 1
           fi
 
-          SYSTEMPROMPTCONTENT=$(cat system_prompt.md)
-
-          # 获取旧变量值并存入 outputs (修正变量名 REPO 为 github.repository)
-          OLDVALUE=$(gh api /repos/${{ github.repository }}/actions/variables/SYSTEM_PROMPT --jq '.value' 2>/dev/null || echo "")
-          
-          echo "oldvalue<<EOF" >> $GITHUB_OUTPUT
-          echo "$OLDVALUE" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # 读取 system_prompt.md 内容
+          SYSTEM_PROMPT_CONTENT=$(cat system_prompt.md)
 
           # 更新 GitHub Actions 变量
           gh api --method PATCH \
             /repos/${{ github.repository }}/actions/variables/SYSTEM_PROMPT \
             -f name=SYSTEM_PROMPT \
-            -f value="$SYSTEMPROMPTCONTENT"
+            -f value="$SYSTEM_PROMPT_CONTENT"
 
           echo "✓ SYSTEM_PROMPT 变量已更新"
           echo "文件大小: $(wc -c < system_prompt.md) 字符"
-
-  create-diff-issue:
-    needs: update
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-      contents: read
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Create diff issue
-        run: |
-          # 读取旧值（来自 update job）
-          OLDVALUE='${{ needs.update.outputs.oldvalue }}'
-          # 读取新值 (修正文件名 system_prompt.md)
-          NEWVALUE=$(cat system_prompt.md)
-
-          # 构建 diff 内容
-          DIFFCONTENT=$(diff -u <(echo "$OLDVALUE") <(echo "$NEWVALUE") 2>/dev/null || echo "No diff available")
-
-          # 严格按照你要求的结构构建 Issue Body，使用文件避免转义问题
-          echo "工作流运行 #${{ github.run_id }}" > issue_body.txt
-          echo "" >> issue_body.txt
-          echo "\`\`\`diff" >> issue_body.txt
-          echo "$DIFFCONTENT" >> issue_body.txt
-          echo "\`\`\`" >> issue_body.txt
-
-          # 创建 issue
-          gh issue create \
-            --title "[工作流] 提示词更新 ${{ github.run_id }}" \
-            --body-file issue_body.txt \
-            --label workflow \
-            --label documentation
