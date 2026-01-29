@@ -213,20 +213,20 @@ def extract_pr_timeline_items(resource_data: Dict) -> List[TimelineItem]:
     # 2. 审核
     reviews = resource_data.get("reviews", {}).get("nodes", [])
     for r in reviews:
-        if r.get("body"):
-            # GraphQL返回的是submittedAt（驼峰命名），不是submitted_at（下划线命名）
-            # 优先使用submittedAt，如果没有则使用createdAt
-            created_at = r.get("submittedAt", r.get("createdAt", ""))
-            if not created_at:
-                created_at = "1970-01-01T00:00:00Z"  # 默认值
-            timeline.append(TimelineItem(
-                id=str(r.get("id", "")),
-                body=r.get("body", ""),
-                created_at=created_at,
-                user=(r.get("author") or {}).get("login", "unknown"),
-                type="review",
-                state=r.get("state")
-            ))
+        # 即使 review body 为空也要添加到 timeline，因为 latest_comment_url 可能指向 review 本身
+        # 例如：review comment 的 latest_comment_url 指向 review，但 @ 提及在 review comment 中
+        # 如果 review 不在 timeline 中，就无法通过 ID 匹配找到它，也就无法回退搜索
+        created_at = r.get("submittedAt", r.get("createdAt", ""))
+        if not created_at:
+            created_at = "1970-01-01T00:00:00Z"  # 默认值
+        timeline.append(TimelineItem(
+            id=str(r.get("id", "")),
+            body=r.get("body", ""),
+            created_at=created_at,
+            user=(r.get("author") or {}).get("login", "unknown"),
+            type="review",
+            state=r.get("state")
+        ))
 
     # 3. 审核评论（行内代码评论）- 从reviewThreads获取
     review_threads = resource_data.get("reviewThreads", {}).get("nodes", [])
