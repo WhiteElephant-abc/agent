@@ -3,52 +3,53 @@ name: Update System Prompt
 on:
   push:
     paths:
-      - "system_prompt.md"
+      - 'system_prompt.md'
   workflow_dispatch:
 
 jobs:
   update:
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: read
-      issues: write
-      actions: read
-
     env:
       GH_TOKEN: ${{ secrets.REPOSITORY_VARIABLE_API_KEY }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Update SYSTEM_PROMPT variable
         id: update
         run: |
           echo "正在更新 SYSTEM_PROMPT 变量..."
 
+          # 检查 system_prompt.md 文件是否存在
           if [ ! -f "system_prompt.md" ]; then
             echo "错误: system_prompt.md 文件不存在"
             exit 1
           fi
 
-          SYSTEM_PROMPT_CONTENT="$(cat system_prompt.md)"
+          # 读取 system_prompt.md 内容
+          SYSTEM_PROMPT_CONTENT=$(cat system_prompt.md)
 
-          OLD_VALUE=$(gh api \
-            /repos/${{ github.repository }}/actions/variables/SYSTEM_PROMPT \
-            --jq '.value' 2>/dev/null || echo "")
+          # 获取旧变量值
+          OLD_VALUE=$(gh api /repos/${{ vars.REPO }}/actions/variables/SYSTEM_PROMPT --jq '.value' 2>/dev/null || echo "")
 
+          # 更新 GitHub Actions 变量
           gh api --method PATCH \
-            /repos/${{ github.repository }}/actions/variables/SYSTEM_PROMPT \
-            --raw-field name=SYSTEM_PROMPT \
-            --raw-field value="$SYSTEM_PROMPT_CONTENT"
+            /repos/${{ vars.REPO }}/actions/variables/SYSTEM_PROMPT \
+            -f name=SYSTEM_PROMPT \
+            -f value="$SYSTEM_PROMPT_CONTENT"
 
           echo "✓ SYSTEM_PROMPT 变量已更新"
+          echo "文件大小: $(wc -c < system_prompt.md) 字符"
 
-          {
-            echo "old_value<<EOF"
-            echo "$OLD_VALUE"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          # 将旧值输出到下一步
+          echo "old_value<<EOF" >> $GITHUB_OUTPUT
+          echo "$OLD_VALUE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
   create-diff-issue:
     needs: update
@@ -56,30 +57,32 @@ jobs:
     permissions:
       issues: write
       contents: read
-
     env:
-      GH_TOKEN: ${{ secrets.REPOSITORY_VARIABLE_API_KEY }}
-
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Create diff issue
         run: |
+          # 读取旧值（来自 update job 的输出）
           OLD_VALUE="${{ needs.update.outputs.old_value }}"
-          NEW_VALUE="$(cat system_prompt.md)"
+          # 读取新值
+          NEW_VALUE=$(cat system_prompt.md)
 
-          DIFF_CONTENT=$(diff -u <(echo "$OLD_VALUE") <(echo "$NEW_VALUE") || echo "No diff available")
+          # 构建 diff 内容
+          DIFF_CONTENT=$(diff -u <(echo "$OLD_VALUE") <(echo "$NEW_VALUE") 2>/dev/null || echo "No diff available")
 
-          ISSUE_BODY=$(cat <<EOF
-[工作流运行 #${{ github.run_id }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          # 构建 issue 内容
+          ISSUE_BODY="[工作流运行 #${{ github.run_id }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
 \`\`\`diff
-$DIFF_CONTENT
-\`\`\`
-EOF
-)
+${DIFF_CONTENT}
+\`\`\`"
 
+          # 创建 issue
           gh issue create \
             --title "[工作流] 提示词更新 ${{ github.run_id }}" \
             --body "$ISSUE_BODY" \
