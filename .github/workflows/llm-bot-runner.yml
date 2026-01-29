@@ -11,52 +11,81 @@ on:
         description: '任务的JSON上下文'
         required: true
         type: string
+  repository_dispatch:
+    types: [llm-task]
 
 jobs:
-  create-issue:
+  prepare-context:
     runs-on: ubuntu-latest
     permissions:
       issues: write
     outputs:
-      issue_number: ${{ steps.create-issue.outputs.issue_number }}
+      issue_number: ${{ steps.prepare-context.outputs.issue_number }}
+      task_content: ${{ steps.prepare-context.outputs.task_content }}
 
     steps:
-      - name: Create issue
-        id: create-issue
+      - name: Prepare context
+        id: prepare-context
         env:
           GH_TOKEN: ${{ github.token }}
-          TASK_CONTENT: ${{ inputs.task }}
-          CONTEXT_RAW: ${{ inputs.context }}
+          TASK_CONTENT: ${{ github.event.client_payload.task || inputs.task }}
+          CONTEXT_RAW: ${{ github.event.client_payload.context || inputs.context }}
+          ISSUE_NUMBER_FROM_PAYLOAD: ${{ github.event.client_payload.issue_number }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          EVENT_TYPE: ${{ github.event_name }}
         run: |
-          # 1. 格式化 Context
-          FORMATTED_CONTEXT=$(echo "$CONTEXT_RAW" | sed 's/^"//; s/"$//' | jq '.')
+          echo "Event type: $EVENT_TYPE"
 
-          # 2. 构建 Markdown 正文
-          printf "[工作流运行 #$GITHUB_RUN_ID](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)\n\n## Task\n%s\n\n## Context\n\`\`\`json\n%s\n\`\`\`" \
+          # 1. 从 repository_dispatch 或 workflow_dispatch 获取数据
+          if [ "$EVENT_TYPE" = "repository_dispatch" ]; then
+            echo "Using repository_dispatch payload"
+
+            # 检查是否需要从 issue 读取（如果 payload 中的 context 为空或太大）
+            if [ -z "$CONTEXT_RAW" ] || [ "${#CONTEXT_RAW}" -gt 50000 ]; then
+              echo "Context from payload is empty or too large, reading from issue..."
+              # 从 payload 的 issue_number 字段获取存储数据的 issue
+              if [ -n "$ISSUE_NUMBER_FROM_PAYLOAD" ]; then
+                echo "Reading context from issue #$ISSUE_NUMBER_FROM_PAYLOAD"
+                # 从 issue body 读取数据
+                ISSUE_BODY=$(gh issue view "$ISSUE_NUMBER_FROM_PAYLOAD" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')
+                # 提取 TASK 和 CONTEXT
+                TASK_CONTENT=$(echo "$ISSUE_BODY" | sed -n 's/.*<!-- TASK_START -->\(.*\)<!-- TASK_END -->.*/\1/p')
+                CONTEXT_RAW=$(echo "$ISSUE_BODY" | sed -n 's/.*<!-- CONTEXT_START -->\(.*\)<!-- CONTEXT_END -->.*/\1/p')
+              fi
+            fi
+          else
+            echo "Using workflow_dispatch inputs"
+          fi
+
+          # 2. 格式化 Context
+          FORMATTED_CONTEXT=$(echo "$CONTEXT_RAW" | sed 's/^"//; s/"$//' | jq '.' 2>/dev/null || echo "$CONTEXT_RAW")
+
+          # 3. 构建 Markdown 正文
+          printf "[工作流运行 #$GITHUB_RUN_ID](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)\\n\\n## Task\\n%s\\n\\n## Context\\n\\`\\`\\`json\\n%s\\n\\`\\`\\`" \
             "$TASK_CONTENT" "$FORMATTED_CONTEXT" > body.md
 
-          # 3. 创建 Issue（硬编码标签 workflow）
+          # 4. 创建 Issue（硬编码标签 workflow）
           ISSUE_URL=$(gh issue create \
             --repo "$GITHUB_REPOSITORY" \
             --title "[工作流] Run $GITHUB_RUN_ID" \
             --body-file body.md \
             --label "workflow")
 
-          # 4. 提取 Issue 编号
+          # 5. 提取 Issue 编号
           ISSUE_NUMBER=${ISSUE_URL##*/}
           echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "task_content=$TASK_CONTENT" >> "$GITHUB_OUTPUT"
 
           echo "成功创建 Issue: $ISSUE_NUMBER"
 
   run-llm-bot:
-    needs: create-issue
+    needs: prepare-context
     runs-on: ubuntu-latest
     env:
-      LLM_TASK: ${{ inputs.task }}
-      LLM_CONTEXT: ${{ inputs.context }}
-      LOG_ISSUE_NUMBER: ${{ needs.create-issue.outputs.issue_number }}
+      LLM_TASK: ${{ needs.prepare-context.outputs.task_content }}
+      LLM_CONTEXT: ${{ github.event.client_payload.context || inputs.context }}
+      LOG_ISSUE_NUMBER: ${{ needs.prepare-context.outputs.issue_number }}
       # GitHub身份令牌（4个名称都设置）- 使用agent的token
       GITHUB_TOKEN: ${{ secrets.WEINAR_API_KEY }}
       GH_TOKEN: ${{ secrets.WEINAR_API_KEY }}
@@ -213,7 +242,7 @@ jobs:
           echo ""
 
           # 构建新任务字符串，包含读取context.json的指示
-          ENHANCED_TASK=$(printf "%s\n\n> 任务上下文已保存到/app/context.json，共%s字符。阅读该文件以了解上下文！" "$LLM_TASK" "$CONTEXT_CHARS")
+          ENHANCED_TASK=$(printf "%s\\n\\n> 任务上下文已保存到/app/context.json，共%s字符。阅读该文件以了解上下文！" "$LLM_TASK" "$CONTEXT_CHARS")
           echo "增强任务: $ENHANCED_TASK"
 
           claude \
