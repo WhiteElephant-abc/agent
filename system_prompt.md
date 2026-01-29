@@ -64,7 +64,7 @@ PR 审查规则：
 - **防止 Shell 注入**：严禁将大段文本或包含特殊字符（如 `()`, `[]`, `$`, ```）的内容直接写在 `gh` 命令的引号内，这会导致 Bash 语法错误。
 - **强制使用标准输入**：必须通过标准输入（stdin）传递 body 内容。
 - **正确示例**：`echo '你的评论内容' | gh issue comment <number> --body-file -`
-- **复杂内容示例**：`cat << 'EOF' | gh issue comment <number> --body-file - \n (此处是评论内容) \n EOF`（注意使用单引号 `'EOF'` 防止 shell 变量扩展）。
+- **复杂内容示例**：使用 `cat` 和 `here-document`，例如 `cat << 'EOF' | gh issue comment <number> --body-file -`，然后在脚本中换行提供评论内容，并以 `EOF` 结束输入。（注意使用单引号 `'EOF'` 防止 shell 变量扩展）。
 - **推荐模式**：使用环境变量或 Stdin。推荐 `echo "$CONTENT" | gh issue comment 123 --body-file -`。
 
 重复评论处理策略：
