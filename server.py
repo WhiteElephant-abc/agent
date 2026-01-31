@@ -22,6 +22,9 @@ LOG_FILE = os.getenv("PROCESSED_LOG", "/data/processed_notifications.log")
 CONTEXT_MAX_CHARS = int(os.getenv("CONTEXT_MAX_CHARS", "15000"))
 DIFF_MAX_CHARS = int(os.getenv("DIFF_MAX_CHARS", "4000"))
 
+# GitHub Actions inputs 限制为 64KB (65536 字节)
+GITHUB_INPUTS_MAX_SIZE = 64000
+
 # --- 日志配置 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("EnhancedBot")
@@ -961,8 +964,23 @@ async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_tex
     # 记录任务描述
     logger.info(f"LLM_TASK to send: '{task_text[:200]}{'...' if len(task_text) > 200 else ''}'")
 
-    # GitHub Actions inputs 限制为 64KB (65536 字节)
-    GITHUB_INPUTS_MAX_SIZE = 64000
+    # 定义缩减步骤函数
+    def drop_diff():
+        logger.info(f"Dropping diff_content to reduce size (was {len(ctx.diff_content)} chars)")
+        ctx.diff_content = None
+
+    def reduce_comments():
+        original_count = len(ctx.comments_history)
+        ctx.comments_history = ctx.comments_history[-5:]
+        logger.info(f"Reducing comments history from {original_count} to 5 items")
+
+    def drop_review_comments():
+        logger.info(f"Dropping review_comments_batch (was {len(ctx.review_comments_batch)} items)")
+        ctx.review_comments_batch = None
+
+    def drop_reviews_history():
+        logger.info(f"Dropping reviews_history (was {len(ctx.reviews_history)} items)")
+        ctx.reviews_history = None
 
     # 按优先级丢弃数据，直到上下文大小满足要求
     if len(context_str) > GITHUB_INPUTS_MAX_SIZE:
@@ -972,31 +990,18 @@ async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_tex
 
         # 1. 优先丢弃 diff_content（diff 通常很大）
         if ctx.diff_content:
-            def drop_diff():
-                logger.info(f"Dropping diff_content to reduce size (was {len(ctx.diff_content)} chars)")
-                ctx.diff_content = None
             reduction_steps.append(drop_diff)
 
         # 2. 截断评论历史（只保留最近 5 条）
         if ctx.comments_history:
-            def reduce_comments():
-                original_count = len(ctx.comments_history)
-                ctx.comments_history = ctx.comments_history[-5:]
-                logger.info(f"Reducing comments history from {original_count} to 5 items")
             reduction_steps.append(reduce_comments)
 
         # 3. 丢弃 review_comments_batch
         if ctx.review_comments_batch:
-            def drop_review_comments():
-                logger.info(f"Dropping review_comments_batch (was {len(ctx.review_comments_batch)} items)")
-                ctx.review_comments_batch = None
             reduction_steps.append(drop_review_comments)
 
         # 4. 丢弃 reviews_history
         if ctx.reviews_history:
-            def drop_reviews_history():
-                logger.info(f"Dropping reviews_history (was {len(ctx.reviews_history)} items)")
-                ctx.reviews_history = None
             reduction_steps.append(drop_reviews_history)
 
         for step in reduction_steps:
