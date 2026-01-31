@@ -937,7 +937,7 @@ async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_tex
     # 检查上下文大小
     context_str = ctx.to_json_string()
     logger.info(f"Context size: {len(context_str)} chars")
-    
+
     # 调试信息
     if ctx.comments_history:
         logger.info(f"Comments history: {len(ctx.comments_history)} items")
@@ -951,35 +951,110 @@ async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_tex
             logger.info(f"  ReviewComment[{i}]: @{comment.get('user')} - {comment.get('path')}: {comment.get('body', '')[:50]}...")
     if ctx.is_truncated is not None:
         logger.info(f"Context was truncated: {ctx.is_truncated}")
-    
+
     # 检查是否有重复/空字段
     logger.info(f"diff_content present: {bool(ctx.diff_content)}")
     logger.info(f"clone_url: {ctx.clone_url}")
     logger.info(f"head_ref: {ctx.head_ref}, base_ref: {ctx.base_ref}")
     logger.info(f"head_repo: {ctx.head_repo}, base_repo: {ctx.base_repo}")
-    
+
     # 记录任务描述
     logger.info(f"LLM_TASK to send: '{task_text[:200]}{'...' if len(task_text) > 200 else ''}'")
-    
-    if len(context_str) > 60000:  # GitHub限制
-        logger.warning(f"Context too large ({len(context_str)} chars), truncating...")
-        # 简化上下文
-        ctx.diff_content = "[Diff truncated due to size limits]"
-        if ctx.comments_history and len(ctx.comments_history) > 10:
-            logger.info(f"Reducing comments history from {len(ctx.comments_history)} to 10 items")
-            ctx.comments_history = ctx.comments_history[-10:]  # 只保留最近10条
-        context_str = ctx.to_json_string()
+
+    # GitHub Actions inputs 限制为 64KB (65536 字节)
+    GITHUB_INPUTS_MAX_SIZE = 64000
+
+    # 检查是否需要将数据存储到 issue（因为 repository_dispatch 的 payload 也有 64KB 限制）
+    issue_number = None
+    use_repository_dispatch = True
+
+    # 如果数据太大，需要先创建 issue 存储数据
+    if len(context_str) > 50000 or len(task_text) > 10000:
+        logger.warning(f"Data too large (context: {len(context_str)}, task: {len(task_text)}), storing in issue...")
+
+        # 创建 issue 来存储数据
+        issue_body = f"""<!-- TASK_START -->{task_text}<!-- TASK_END -->
+<!-- CONTEXT_START -->{context_str}<!-- CONTEXT_END -->
+
+> 这个 issue 用于存储 workflow 的上下文数据，由 repository_dispatch 触发。
+> Run ID: {os.getenv('GITHUB_RUN_ID', 'unknown')}
+> Triggered by: {ctx.trigger_user}
+"""
+
+        issue_url = await create_issue(client, f"[数据存储] Context for node {node_id}", issue_body)
+        if issue_url:
+            issue_number = issue_url.split('/')[-1]
+            logger.info(f"Created issue #{issue_number} to store context data")
+            # 清空数据，因为将从 issue 读取
+            context_str = ""
+            task_text = ""
+        else:
+            logger.error("Failed to create issue for large data, falling back to truncation")
+            # 回退到截断方案
+            use_repository_dispatch = False
+
+    # 如果仍然超限（未使用 issue 存储），丢弃 diff_content
+    if len(context_str) > GITHUB_INPUTS_MAX_SIZE:
+        logger.warning(f"Context too large ({len(context_str)} chars), attempting to reduce...")
+
+        # 优先丢弃 diff_content（diff 通常很大）
+        if ctx.diff_content:
+            logger.info(f"Dropping diff_content to reduce size (was {len(ctx.diff_content)} chars)")
+            ctx.diff_content = None
+            context_str = ctx.to_json_string()
+            logger.info(f"Context size after dropping diff: {len(context_str)} chars")
+
+        # 如果仍然超限，进一步截断评论历史
+        if len(context_str) > GITHUB_INPUTS_MAX_SIZE and ctx.comments_history:
+            original_count = len(ctx.comments_history)
+            # 只保留最近 5 条评论
+            ctx.comments_history = ctx.comments_history[-5:]
+            logger.info(f"Reducing comments history from {original_count} to 5 items")
+            context_str = ctx.to_json_string()
+            logger.info(f"Context size after reducing comments: {len(context_str)} chars")
+
+        # 如果仍然超限，丢弃 review_comments_batch
+        if len(context_str) > GITHUB_INPUTS_MAX_SIZE and ctx.review_comments_batch:
+            logger.info(f"Dropping review_comments_batch (was {len(ctx.review_comments_batch)} items)")
+            ctx.review_comments_batch = None
+            context_str = ctx.to_json_string()
+            logger.info(f"Context size after dropping review_comments_batch: {len(context_str)} chars")
+
+        # 如果仍然超限，丢弃 reviews_history
+        if len(context_str) > GITHUB_INPUTS_MAX_SIZE and ctx.reviews_history:
+            logger.info(f"Dropping reviews_history (was {len(ctx.reviews_history)} items)")
+            ctx.reviews_history = None
+            context_str = ctx.to_json_string()
+            logger.info(f"Context size after dropping reviews_history: {len(context_str)} chars")
+
+        # 最终检查
+        if len(context_str) > GITHUB_INPUTS_MAX_SIZE:
+            logger.error(f"Context still too large ({len(context_str)} chars) after all reductions. Workflow dispatch may fail.")
+            # 继续尝试，让 GitHub 返回错误，而不是在这里失败
+        else:
+            logger.info(f"Context reduced to acceptable size: {len(context_str)} chars")
 
     url = f"{REST_API}/repos/{CONTROL_REPO}/actions/workflows/llm-bot-runner.yml/dispatches"
     headers = {"Authorization": f"token {GQL_TOKEN}", "Accept": "application/vnd.github.v3+json"}
 
+    # 构建 payload
     payload = {
         "ref": "main",
-        "inputs": {
+        "client_payload": {}
+    }
+
+    if use_repository_dispatch:
+        # 使用 repository_dispatch
+        payload["client_payload"]["task"] = task_text[:2000] if task_text else ""
+        payload["client_payload"]["context"] = context_str if context_str else ""
+        if issue_number:
+            payload["client_payload"]["issue_number"] = issue_number
+    else:
+        # 回退到 workflow_dispatch（数据已截断）
+        payload["inputs"] = {
             "task": task_text[:2000],
             "context": context_str
         }
-    }
 
     try:
         r = await client.post(url, headers=headers, json=payload)
@@ -1011,6 +1086,32 @@ async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_tex
     except Exception as e:
         logger.error(f"Exception during workflow dispatch: {e}")
         return False
+
+
+async def create_issue(client: httpx.AsyncClient, title: str, body: str) -> Optional[str]:
+    """
+    创建 GitHub Issue 并返回 URL
+    """
+    url = f"{REST_API}/repos/{CONTROL_REPO}/issues"
+    headers = {"Authorization": f"token {GQL_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+
+    payload = {
+        "title": title,
+        "body": body,
+        "labels": ["context-data"]
+    }
+
+    try:
+        r = await client.post(url, headers=headers, json=payload)
+        if r.status_code == 201:
+            data = r.json()
+            return data.get("html_url")
+        else:
+            logger.error(f"Failed to create issue: {r.status_code} - {r.text}")
+            return None
+    except Exception as e:
+        logger.error(f"Exception creating issue: {e}")
+        return None
 
 # --- 轮询逻辑 ---
 async def poll_loop():
