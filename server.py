@@ -964,33 +964,7 @@ async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_tex
     # GitHub Actions inputs 限制为 64KB (65536 字节)
     GITHUB_INPUTS_MAX_SIZE = 64000
 
-    # 检查是否需要将数据存储到 issue
-    issue_number = None
-
-    # 如果数据太大，需要先创建 issue 存储数据
-    if len(context_str) > 50000 or len(task_text) > 10000:
-        logger.warning(f"Data too large (context: {len(context_str)}, task: {len(task_text)}), storing in issue...")
-
-        # 创建 issue 来存储数据
-        issue_body = f"""<!-- TASK_START -->{task_text}<!-- TASK_END -->
-<!-- CONTEXT_START -->{context_str}<!-- CONTEXT_END -->
-
-> 这个 issue 用于存储 workflow 的上下文数据，由 repository_dispatch 触发。
-> Run ID: {os.getenv('GITHUB_RUN_ID', 'unknown')}
-> Triggered by: {ctx.trigger_user}
-"""
-
-        issue_url = await create_issue(client, f"[数据存储] Context for node {node_id}", issue_body)
-        if issue_url:
-            issue_number = issue_url.split('/')[-1]
-            logger.info(f"Created issue #{issue_number} to store context data")
-            # 清空数据，因为将从 issue 读取
-            context_str = ""
-            task_text = ""
-        else:
-            logger.error("Failed to create issue for large data, falling back to truncation")
-
-    # 如果仍然超限（未使用 issue 存储），按优先级丢弃数据
+    # 按优先级丢弃数据，直到上下文大小满足要求
     if len(context_str) > GITHUB_INPUTS_MAX_SIZE:
         logger.warning(f"Context too large ({len(context_str)} chars), attempting to reduce...")
 
@@ -1045,18 +1019,11 @@ async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_tex
     # 构建 payload
     payload = {
         "ref": "main",
-        "inputs": {}
+        "inputs": {
+            "task": task_text[:2000],
+            "context": context_str
+        }
     }
-
-    task_to_send = task_text[:2000] if task_text else ""
-    context_to_send = context_str if context_str else ""
-
-    # workflow_dispatch API 端点 (/actions/workflows/{workflow_id}/dispatches)
-    # 期望在 payload 中接收一个 inputs 对象来传递参数
-    payload["inputs"]["task"] = task_to_send
-    payload["inputs"]["context"] = context_to_send
-    if issue_number:
-        payload["inputs"]["issue_number"] = issue_number
 
     try:
         r = await client.post(url, headers=headers, json=payload)
@@ -1088,32 +1055,6 @@ async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_tex
     except Exception as e:
         logger.error(f"Exception during workflow dispatch: {e}")
         return False
-
-
-async def create_issue(client: httpx.AsyncClient, title: str, body: str) -> Optional[str]:
-    """
-    创建 GitHub Issue 并返回 URL
-    """
-    url = f"{REST_API}/repos/{CONTROL_REPO}/issues"
-    headers = {"Authorization": f"token {GQL_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-
-    payload = {
-        "title": title,
-        "body": body,
-        "labels": ["context-data"]
-    }
-
-    try:
-        r = await client.post(url, headers=headers, json=payload)
-        if r.status_code == 201:
-            data = r.json()
-            return data.get("html_url")
-        else:
-            logger.error(f"Failed to create issue: {r.status_code} - {r.text}")
-            return None
-    except Exception as e:
-        logger.error(f"Exception creating issue: {e}")
-        return None
 
 # --- 轮询逻辑 ---
 async def poll_loop():
