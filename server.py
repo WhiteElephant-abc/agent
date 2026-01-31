@@ -22,6 +22,9 @@ LOG_FILE = os.getenv("PROCESSED_LOG", "/data/processed_notifications.log")
 CONTEXT_MAX_CHARS = int(os.getenv("CONTEXT_MAX_CHARS", "15000"))
 DIFF_MAX_CHARS = int(os.getenv("DIFF_MAX_CHARS", "4000"))
 
+# GitHub Actions inputs 限制为 64KB (65536 字节)
+GITHUB_INPUTS_MAX_SIZE = 64000
+
 # --- 日志配置 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("EnhancedBot")
@@ -937,7 +940,7 @@ async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_tex
     # 检查上下文大小
     context_str = ctx.to_json_string()
     logger.info(f"Context size: {len(context_str)} chars")
-    
+
     # 调试信息
     if ctx.comments_history:
         logger.info(f"Comments history: {len(ctx.comments_history)} items")
@@ -951,28 +954,74 @@ async def trigger_workflow(client: httpx.AsyncClient, ctx: TaskContext, task_tex
             logger.info(f"  ReviewComment[{i}]: @{comment.get('user')} - {comment.get('path')}: {comment.get('body', '')[:50]}...")
     if ctx.is_truncated is not None:
         logger.info(f"Context was truncated: {ctx.is_truncated}")
-    
+
     # 检查是否有重复/空字段
     logger.info(f"diff_content present: {bool(ctx.diff_content)}")
     logger.info(f"clone_url: {ctx.clone_url}")
     logger.info(f"head_ref: {ctx.head_ref}, base_ref: {ctx.base_ref}")
     logger.info(f"head_repo: {ctx.head_repo}, base_repo: {ctx.base_repo}")
-    
+
     # 记录任务描述
     logger.info(f"LLM_TASK to send: '{task_text[:200]}{'...' if len(task_text) > 200 else ''}'")
-    
-    if len(context_str) > 60000:  # GitHub限制
-        logger.warning(f"Context too large ({len(context_str)} chars), truncating...")
-        # 简化上下文
-        ctx.diff_content = "[Diff truncated due to size limits]"
-        if ctx.comments_history and len(ctx.comments_history) > 10:
-            logger.info(f"Reducing comments history from {len(ctx.comments_history)} to 10 items")
-            ctx.comments_history = ctx.comments_history[-10:]  # 只保留最近10条
-        context_str = ctx.to_json_string()
+
+    # 定义缩减步骤函数
+    def drop_diff():
+        logger.info(f"Dropping diff_content to reduce size (was {len(ctx.diff_content)} chars)")
+        ctx.diff_content = None
+
+    def reduce_comments():
+        original_count = len(ctx.comments_history)
+        ctx.comments_history = ctx.comments_history[-5:]
+        logger.info(f"Reducing comments history from {original_count} to 5 items")
+
+    def drop_review_comments():
+        logger.info(f"Dropping review_comments_batch (was {len(ctx.review_comments_batch)} items)")
+        ctx.review_comments_batch = None
+
+    def drop_reviews_history():
+        logger.info(f"Dropping reviews_history (was {len(ctx.reviews_history)} items)")
+        ctx.reviews_history = None
+
+    # 按优先级丢弃数据，直到上下文大小满足要求
+    if len(context_str) > GITHUB_INPUTS_MAX_SIZE:
+        logger.warning(f"Context too large ({len(context_str)} chars), attempting to reduce...")
+
+        reduction_steps = []
+
+        # 1. 优先丢弃 diff_content（diff 通常很大）
+        if ctx.diff_content:
+            reduction_steps.append(drop_diff)
+
+        # 2. 截断评论历史（只保留最近 5 条）
+        if ctx.comments_history:
+            reduction_steps.append(reduce_comments)
+
+        # 3. 丢弃 review_comments_batch
+        if ctx.review_comments_batch:
+            reduction_steps.append(drop_review_comments)
+
+        # 4. 丢弃 reviews_history
+        if ctx.reviews_history:
+            reduction_steps.append(drop_reviews_history)
+
+        for step in reduction_steps:
+            if len(context_str) <= GITHUB_INPUTS_MAX_SIZE:
+                break
+            step()
+            context_str = ctx.to_json_string()
+            logger.info(f"Context size after reduction: {len(context_str)} chars")
+
+        # 最终检查
+        if len(context_str) > GITHUB_INPUTS_MAX_SIZE:
+            logger.error(f"Context still too large ({len(context_str)} chars) after all reductions. Workflow dispatch may fail.")
+            # 继续尝试，让 GitHub 返回错误，而不是在这里失败
+        else:
+            logger.info(f"Context reduced to acceptable size: {len(context_str)} chars")
 
     url = f"{REST_API}/repos/{CONTROL_REPO}/actions/workflows/llm-bot-runner.yml/dispatches"
     headers = {"Authorization": f"token {GQL_TOKEN}", "Accept": "application/vnd.github.v3+json"}
 
+    # 构建 payload
     payload = {
         "ref": "main",
         "inputs": {
