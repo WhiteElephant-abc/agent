@@ -2,7 +2,7 @@
 
 > [!WARNING]
 >
-> 此文档由 WhiteElephantIsNotARobot 撰写，可能存在错误！
+> 此文档由 @WhiteElephantIsNotARobot 撰写，可能存在错误！
 
 一个基于 Claude Code 的 GitHub AI Agent，能够自动处理 GitHub 通知、审查代码、修复问题，并通过 GitHub Actions 工作流执行任务。
 
