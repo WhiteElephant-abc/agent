@@ -69,6 +69,7 @@ jobs:
       ANTHROPIC_DEFAULT_OPUS_MODEL: "mimo-v2-flash"
       ANTHROPIC_DEFAULT_SONNET_MODEL: "mimo-v2-flash"
       ANTHROPIC_DEFAULT_HAIKU_MODEL: "mimo-v2-flash"
+      ENABLE_TOOL_SEARCH: "false"
       # MCP服务器环境变量
       CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
       # 系统提示词
