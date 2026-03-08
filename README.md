@@ -191,17 +191,9 @@
 ### 6.2 分片机制
 - **触发条件**：当 `context` 字符串超过 48 KB（可配置）时触发分片。
 - **分片流程**：
-  1. 服务端先将上下文完整序列化为字符串（JSON）。
-  2. 对字符串进行**分片**（直接按大小切割，无需先编码）。
-  3. 每个分片进行压缩（可选）和 base64 编码，存入 payload。
-  4. 通过多个 `repository_dispatch` 发送分片，每个分片作为 artifact 上传（或直接嵌入 payload，但受 64 KB 限制，故推荐 artifact）。
-- **Shard Payload 字段**：
-  - `jobid`
-  - `shard_index`
-  - `total_shards`
-  - `encoding`（如 `gzip+base64`）
-  - `checksum`（用于合并后校验）
-  - `data_b64`：**分片后再编码**的内容（即先分片，再压缩/编码）。
+  1. 服务端先将上下文完整序列化为字符串（JSON）并 base64 编码。
+  2. 对字符串进行**分片**（直接按大小切割）。
+  3. 通过多个 `repository_dispatch` 发送分片，专用工作流进行接收处理。
 
 ### 6.3 合并
 - Actions 端接收所有分片后，按索引排序、解码、拼接，校验 checksum，恢复完整上下文。
